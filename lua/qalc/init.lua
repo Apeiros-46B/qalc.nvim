@@ -15,7 +15,7 @@ local config = {
     -- example: { '--set', 'angle deg' } to use degrees as the default angle unit
     cmd_args = {}, -- table
 
-    -- default filetype to set qalc buffers to
+    -- the plugin will set all attached buffers to have this filetype
     set_ft = 'qalc', -- string
 
     -- file extension to automatically attach qalc to
@@ -37,24 +37,14 @@ local config = {
     },
 
     -- diagnostic options
-    diagnostics = {
-        -- severities
-        -- keys correspond to Qalculate output, values are diagnostic severities
-        severity = { -- table
-            warning = vim.diagnostic.severity.WARN,
-            error = vim.diagnostic.severity.ERROR,
-        },
-
-        -- options
-        -- this can also be set to `nil` to respect the options in your neovim configuration
-        -- (see `:h vim.diagnostic.config()`)
-        opts = { -- table|nil
-            underline = true,
-            virtual_text = false,
-            signs = true,
-            update_in_insert = true,
-            severity_sort = true,
-        }
+    -- this can also be set to `nil` to respect the options in your neovim configuration
+    -- (see `:h vim.diagnostic.config()`)
+    diagnostics = { -- table|nil
+        underline = true,
+        virtual_text = false,
+        signs = true,
+        update_in_insert = true,
+        severity_sort = true,
     }
 }
 -- }}}
@@ -65,7 +55,9 @@ local function setup(new_config)
     config = vim.tbl_deep_extend('force', config, new_config)
 
     -- setup diagnostic options for our namespace
-    vim.diagnostic.config(config.diagnostics.opts, namespace)
+    if config.diagnostics ~= nil then
+        vim.diagnostic.config(config.diagnostics, namespace)
+    end
 end
 -- }}}
 -- }}}
@@ -90,10 +82,10 @@ end
 local should_detach = {}
 
 local function attach(bufnr)
-    -- we should not detach
+    -- should not detach now
     should_detach[bufnr] = nil
 
-    -- attach
+    -- create callback
     local callback = function()
         -- detach if we should detach
         if should_detach[bufnr] then return true end
@@ -104,9 +96,11 @@ local function attach(bufnr)
         -- get buf contents
         local contents = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 
-        -- run calculator
-        require('qalc.parse').parse(namespace, contents, config)
+        -- process contents
+        require('qalc.parse').process_contents(namespace, contents, config)
     end
+
+    -- attach to buffer updates
     vim.api.nvim_buf_attach(0, false, { on_lines = callback })
 
     -- call the callback now to update
@@ -117,6 +111,7 @@ local function attach(bufnr)
 end
 
 local function detach(bufnr)
+    -- used in callback
     should_detach[bufnr] = true
 end
 -- }}}

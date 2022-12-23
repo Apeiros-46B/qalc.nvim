@@ -28,6 +28,4 @@ local function run(input, config, callback)
     return job
 end
 
-local function  (namespace, input, config)
-
 return { run = run }
