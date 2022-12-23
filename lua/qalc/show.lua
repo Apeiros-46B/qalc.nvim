@@ -7,20 +7,17 @@ local function update_vtext(namespace, bufnr, config, results)
 
     -- {{{ iterate over results
     for linenum, result in pairs(results) do
-        -- non-empty line
+        -- make sure line is non-empty
         if result ~= '' then
-            -- remove equals sign
-            result = string.gsub(result, '^= ', '')
-
-            -- add a new equals sign
-            local equals = config.equals_sign and '= ' or ''
-
-            -- set extmark
+            -- {{{ set extmark
             vim.api.nvim_buf_set_extmark(bufnr, namespace, linenum - 1, 0, {
                 -- text
                 virt_text = {
-                    { equals, config.highlights.equals },
-                    { result, config.highlights.result },
+                    { -- equals sign
+                        config.equals_sign and '= ' or '',
+                        config.highlights.equals
+                    },
+                    { result, config.highlights.result }, -- result
                 },
 
                 -- position
@@ -29,6 +26,7 @@ local function update_vtext(namespace, bufnr, config, results)
                 -- highlight mode
                 hl_mode = 'combine',
             })
+            -- }}}
         end
     end
     -- }}}
@@ -42,9 +40,9 @@ end
 -- }}}
 
 -- {{{ update everything
-local function all(namespace, bufnr, data, config)
-    update_vtext(namespace, bufnr, config, data.results)
-    update_diagnostics(namespace, bufnr, data.diagnostics)
+local function all(namespace, bufnr, config, items)
+    update_vtext(namespace, bufnr, config, items.results)
+    update_diagnostics(namespace, bufnr, items.diagnostics)
 end
 -- }}}
 
