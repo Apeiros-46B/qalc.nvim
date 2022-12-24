@@ -55,4 +55,5 @@ local function run(namespace, input, config)
 end
 -- }}}
 
+-- return module
 return { run = run }

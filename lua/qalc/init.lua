@@ -66,7 +66,7 @@ end
 -- }}}
 
 -- {{{ create a buffer
-local function newbuf(name)
+local function new_buf(name)
     -- get command
     local cmd = 'enew'
 
@@ -134,14 +134,18 @@ return {
     setup = setup,
 
     -- new buffer
-    newbuf = newbuf,
+    new_buf = new_buf,
 
     -- attach
-    attach = attach,
-    attach_current = function() attach(vim.fn.bufnr()) end,
+    attach = {
+        buf = attach,
+        current = function() attach(vim.fn.bufnr()) end,
+    },
 
     -- detach
-    detach = detach,
-    detach_current = function() detach(vim.fn.bufnr()) end,
+    detach = {
+        buf = detach,
+        current = function() detach(vim.fn.bufnr()) end,
+    },
 }
 -- }}}

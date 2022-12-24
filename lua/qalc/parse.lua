@@ -296,4 +296,5 @@ local function parse_results(bufnr, raw_output, inputs, illegal_indices)
 end
 -- }}}
 
+-- return module
 return { input = parse_input, results = parse_results }
