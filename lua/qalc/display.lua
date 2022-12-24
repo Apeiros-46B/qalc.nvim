@@ -38,7 +38,7 @@ local function update_vtext(namespace, bufnr, config, results)
                     -- sign
                     (config.show_sign and {
                         config.sign .. ' ',
-                        config.highlights.equals
+                        config.highlights.sign
                     } or nil),
 
                     -- result
