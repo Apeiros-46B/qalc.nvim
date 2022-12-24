@@ -21,8 +21,11 @@ local config = {
     -- file extension to automatically attach qalc to
     attach_extension = '*.qalc', -- string
 
-    -- whether or not to show an equals sign before the result
-    equals_sign = true, -- boolean
+    -- whether or not to show a sign before the result
+    show_sign = true, -- boolean
+
+    -- sign shown before result
+    sign = '=', -- string
 
     -- whether or not to right align virtual text
     right_align = false, -- boolean
@@ -32,7 +35,7 @@ local config = {
         number   = '@number',
         operator = '@operator',
         unit     = '@field',
-        equals   = '@conceal', -- equals sign before result
+        sign     = '@conceal', -- sign before result
         result   = '@string',  -- result in virtual text
     },
 
@@ -81,39 +84,47 @@ end
 -- {{{ attach & detach
 local should_detach = {}
 
+-- {{{ attach
 local function attach(bufnr)
     -- should not detach now
     should_detach[bufnr] = nil
 
-    -- create callback
+    -- make sure buffer is loaded
+    vim.fn.bufload(bufnr)
+
+    -- {{{ create callback
     local callback = function()
         -- detach if we should detach
         if should_detach[bufnr] then return true end
 
-        -- make sure it's loaded
-        vim.fn.bufload(bufnr)
-
         -- get buf contents
-        local contents = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+        local input = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 
-        -- process contents
-        require('qalc.parse').process_contents(namespace, contents, config)
+        -- run job, parser and updater
+        require('qalc.job').run(namespace, input, config)
     end
-
-    -- attach to buffer updates
-    vim.api.nvim_buf_attach(0, false, { on_lines = callback })
+    -- }}}
 
     -- call the callback now to update
     callback()
 
+    -- attach to buffer updates
+    vim.api.nvim_buf_attach(0, false, { on_lines = callback })
+
     -- set the filetype to desired one
     vim.bo.filetype = config.set_ft
 end
+-- }}}
 
+-- {{{ detach
 local function detach(bufnr)
     -- used in callback
     should_detach[bufnr] = true
+
+    -- clear
+    require('qalc.display').clear.all(namespace, bufnr)
 end
+-- }}}
 -- }}}
 
 -- {{{ return module

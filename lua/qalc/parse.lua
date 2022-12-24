@@ -1,5 +1,6 @@
 -- parses output from Qalculate
 
+-- {{{ utility
 -- {{{ patterns for parsing
 -- TODO: test and add RPN commands
 
@@ -44,26 +45,62 @@ local no_output_cmds = {
     '^save', '^store',
 }
 -- }}}
+
+-- {{{ patterns for diagnostics
+local diagnostic_patterns = {
+    error = '^error: (.+)$',
+    warn = '^warning: (.+)$',
+    unrecognized_opt = '^Unrecognized option%.$',
+    unrecognized_asm = '^Unrecognized assumption%.$',
+    illegal_val = '^Illegal value%.$',
+}
+-- }}}
+-- }}}
+
+-- {{{ match against multiple patterns
+local function matches_any(s, patterns)
+    for _, pattern in pairs(patterns) do
+        if string.find(s, pattern) ~= nil then return true end
+    end
+
+    return false
+end
 -- }}}
 
 -- {{{ check if an expression returns output
-local previous_output = false
+local has_previous_output = false
 
 local function outputs(line)
     -- check for expressions that return no output
-    for _, pattern in pairs(no_output_cmds) do
-        if string.find(line, pattern) ~= nil then return false end
-    end
+    if matches_any(line, no_output_cmds) then return false end
 
     -- check for expressions that only return output if there is a previous result
-    for _, pattern in pairs(output_previous_cmds) do
-        if string.find(line, pattern) ~= nil then return previous_output end
-    end
+    if matches_any(line, output_previous_cmds) then return has_previous_output end
 
     -- otherwise, there is output
-    previous_output = true
+    has_previous_output = true
     return true
 end
+-- }}}
+
+-- {{{ make diagnostic
+local diagnostic_template = {
+    col = 0,
+    end_col = -1,
+    source = 'qalc',
+}
+
+local function diagnostic(severity, message, lnum, bufnr)
+    local new = vim.fn.copy(diagnostic_template)
+
+    new.severity = severity
+    new.message = message
+    new.lnum = lnum
+    new.bufnr = bufnr
+
+    return new
+end
+-- }}}
 -- }}}
 
 -- {{{ parse input
@@ -71,12 +108,10 @@ local function parse_input(input)
     local illegal = {}
 
     for i, line in pairs(input) do
-        for _, pattern in pairs(illegal_cmds) do
-            if string.find(line, pattern) ~= nil then
-                input[i] = '' -- do nothing for this command
-                illegal[#illegal+1] = i -- used for diagnostics
-                break
-            end
+        if matches_any(line, illegal_cmds) then
+            input[i] = '' -- do nothing for this command
+            illegal[#illegal+1] = i -- used for diagnostics
+            break
         end
     end
 
@@ -84,8 +119,8 @@ local function parse_input(input)
 end
 -- }}}
 
--- {{{ parse results
--- {{{ get results (remove input and leading/trailing spaces)
+-- {{{ get results from raw output
+-- (remove input and leading/trailing spaces)
 local function get_results(raw_output, input_length)
     -- {{{ remove all input expressions
     local results = {}
@@ -112,7 +147,8 @@ local function get_results(raw_output, input_length)
 end
 -- }}}
 
--- {{{ make results terse (remove everything before the last equals sign)
+-- {{{ make results terse
+-- (remove everything before the last equals sign)
 local function make_terse(results)
     local new_results = {}
 
@@ -121,6 +157,9 @@ local function make_terse(results)
         -- make sure there are equals signs
         if string.find(result, '=') == nil then
             -- there are no equals signs
+            new_results[i] = result
+        elseif matches_any(result, diagnostic_patterns) then
+            -- shouldn't remove before equals sign, this is a diagnostic
             new_results[i] = result
         elseif string.find(result, '^save') ~= nil then
             -- shouldn't show result, we are saving a variable
@@ -135,33 +174,98 @@ local function make_terse(results)
 end
 -- }}}
 
+-- {{{ recursive helper function for parsing
+local function find_results(parsed, results, result_i, input_i, has_output, bufnr)
+    -- get result
+    local result = results[result_i]
+    if result == nil then return result_i end
+
+    -- match patterns
+    local error = string.match(result, diagnostic_patterns.error)
+    local warn = string.match(result, diagnostic_patterns.warn)
+    local unrecognized_opt = string.match(result, diagnostic_patterns.unrecognized_opt)
+    local unrecognized_asm = string.match(result, diagnostic_patterns.unrecognized_asm)
+    local illegal_val = string.match(result, diagnostic_patterns.illegal_val)
+
+    -- {{{ find
+    -- error
+    if has_output and error ~= nil then
+        -- add diagnostic
+        parsed.diagnostics[#parsed.diagnostics+1] = diagnostic(
+            vim.diagnostic.severity.ERROR,
+            error, input_i - 1, bufnr
+        )
+
+        -- recurse
+        return find_results(parsed, results, result_i + 1, input_i, has_output, bufnr)
+    -- warn
+    elseif has_output and warn ~= nil then
+        -- add diagnostic
+        parsed.diagnostics[#parsed.diagnostics+1] = diagnostic(
+            vim.diagnostic.severity.WARN,
+            warn, input_i - 1, bufnr
+        )
+
+        -- recurse
+        return find_results(parsed, results, result_i + 1, input_i, has_output, bufnr)
+    -- unrecognized option
+    elseif unrecognized_opt ~= nil then
+        -- add diagnostic
+        parsed.diagnostics[#parsed.diagnostics+1] = diagnostic(
+            vim.diagnostic.severity.WARN,
+            unrecognized_opt, input_i - 1, bufnr
+        )
+
+        -- recurse
+        return find_results(parsed, results, result_i + 1, input_i, has_output, bufnr)
+    -- unrecognized assumption
+    elseif unrecognized_asm ~= nil then
+        -- add diagnostic
+        parsed.diagnostics[#parsed.diagnostics+1] = diagnostic(
+            vim.diagnostic.severity.WARN,
+            unrecognized_asm, input_i - 1, bufnr
+        )
+
+        -- recurse
+        return find_results(parsed, results, result_i + 1, input_i, has_output, bufnr)
+    -- illegal value
+    elseif illegal_val ~= nil then
+        -- add diagnostic
+        parsed.diagnostics[#parsed.diagnostics+1] = diagnostic(
+            vim.diagnostic.severity.WARN,
+            illegal_val, input_i - 1, bufnr
+        )
+
+        -- recurse
+        return find_results(parsed, results, result_i + 1, input_i, has_output, bufnr)
+    -- normal/no diagnostics needed
+    else
+        -- add result
+        parsed.results[input_i] = (has_output and results[result_i] or '')
+        return result_i + 1
+    end
+    -- }}}
+
+end
+-- }}}
+
 -- {{{ parse results
 local function parse_results(bufnr, raw_output, inputs, illegal_indices)
+    -- {{{ prepare
     -- create table
     local parsed = { results = {}, diagnostics = {} }
 
-    -- {{{ process given parameters
     -- get only the results
     local results = get_results(raw_output, #inputs)
     results[#results] = nil -- remove last newline
-    results = make_terse(results)
-    -- }}}
+    results = make_terse(results) -- make terse
 
-    -- {{{ parse
     -- indices
     local input_i = 1
     local result_i = 1
-
-    -- {{{ template for diagnostics
-    local diagnostic_template = {
-        bufnr = bufnr,
-        col = 0,
-        end_col = -1,
-        source = 'qalc',
-    }
     -- }}}
 
-    -- loop
+    -- {{{ loop
     while true do
         -- get input line
         local input = inputs[input_i]
@@ -169,56 +273,9 @@ local function parse_results(bufnr, raw_output, inputs, illegal_indices)
 
         -- check if the input line returns output
         if outputs(input) then -- has output
-            -- get result line
-            local result = results[result_i]
-            if result == nil then break end
-
-            -- {{{ check for diagnostics
-            local error = string.match(result, '^error: (.+)$')
-            local warn = string.match(result, '^warning: (.+)$')
-
-            if error ~= nil then -- error
-                -- {{{ get diagnostic
-                local diagnostic = vim.fn.copy(diagnostic_template)
-
-                diagnostic.severity = vim.diagnostic.severity.ERROR
-                diagnostic.message = error
-                diagnostic.lnum = input_i - 1
-
-                parsed.diagnostics[#parsed.diagnostics+1] = diagnostic
-                -- }}}
-
-                -- get result
-                parsed.results[input_i] = results[result_i + 1]
-
-                -- inc 2 times
-                result_i = result_i + 2
-            elseif warn ~= nil then -- warn
-                -- {{{ get diagnostic
-                local diagnostic = vim.fn.copy(diagnostic_template)
-
-                diagnostic.severity = vim.diagnostic.severity.WARN
-                diagnostic.message = warn
-                diagnostic.lnum = input_i - 1
-
-                parsed.diagnostics[#parsed.diagnostics+1] = diagnostic
-                -- }}}
-
-                -- get result
-                parsed.results[input_i] = results[result_i + 1]
-
-                -- inc 2 times
-                result_i = result_i + 2
-            else -- no diagnostic
-                -- get result
-                parsed.results[input_i] = results[result_i]
-
-                -- inc once
-                result_i = result_i + 1
-            end
-            -- }}}
+            result_i = find_results(parsed, results, result_i, input_i, true, bufnr)
         else -- has no output
-            parsed.results[input_i] = ''
+            find_results(parsed, results, result_i, input_i, false, bufnr)
         end
 
         input_i = input_i + 1
@@ -227,44 +284,16 @@ local function parse_results(bufnr, raw_output, inputs, illegal_indices)
 
     -- {{{ add illegal commands to diagnostics
     for _, i in pairs(illegal_indices) do
-        local diagnostic = vim.fn.copy(diagnostic_template)
-
-        diagnostic.severity = vim.diagnostic.severity.HINT
-        diagnostic.message = 'This command is disabled in qalc.nvim due to their being designed for interactive use'
-        diagnostic.lnum = i - 1
-
-        parsed.diagnostics[#parsed.diagnostics+1] = diagnostic
+        parsed.diagnostics[#parsed.diagnostics+1] = diagnostic(
+            vim.diagnostic.severity.HINT,
+            'This command is designed to be used in an interactive session; it has been disabled in qalc.nvim.',
+            i - 1, bufnr
+        )
     end
     -- }}}
 
     return parsed
 end
 -- }}}
--- }}}
 
--- {{{ parse, run, and show
--- TODO: move to init.lua
-local previous_job = 0
-
-local function process_contents(namespace, input, config)
-    -- stop previous job
-    vim.fn.jobstop(previous_job)
-
-    -- parse input
-    local new_input, illegal_indices = parse_input(input)
-
-    -- start new job
-    previous_job = require('qalc.calc').run(new_input, config, function(_, raw_output, _)
-        -- get bufnr
-        local bufnr = vim.fn.bufnr()
-
-        -- parse output
-        local parsed = parse_results(bufnr, raw_output, new_input, illegal_indices)
-
-        -- update
-        require('qalc.show').update_all(namespace, bufnr, config, parsed)
-    end)
-end
--- }}}
-
-return { process_contents = process_contents }
+return { input = parse_input, results = parse_results }
