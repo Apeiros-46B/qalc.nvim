@@ -44,7 +44,7 @@ local function run(namespace, input, config)
     -- start new job
     previous_job = start(new_input, config, function(_, raw_output, _)
         -- get bufnr
-        local bufnr = vim.fn.bufnr()
+        local bufnr = vim.api.nvim_get_current_buf()
 
         -- parse output
         local parsed = parser.results(bufnr, raw_output, new_input, illegal)
