@@ -1,7 +1,8 @@
 -- initializes plugin
 local qalc = require('qalc')
 
--- create :Qalc command
+-- {{{ create commands
+-- Qalc
 vim.api.nvim_create_user_command('Qalc',
     function(tbl)
         -- create a new buffer and attach to it
@@ -12,8 +13,14 @@ vim.api.nvim_create_user_command('Qalc',
     { nargs = '?' }
 )
 
+-- QalcAttach
+vim.api.nvim_create_user_command('QalcAttach', function(_) qalc.attach.current() end, { nargs = 0 })
+-- }}}
+
 -- automatically attach to files with extension set in config
-vim.api.nvim_create_autocmd({ 'BufEnter', 'BufWinEnter', 'BufRead' }, {
-    pattern = { qalc.config.attach_extension },
-    callback = qalc.attach.current,
-})
+if qalc.config.attach_extension ~= '' and qalc.config.attach_extension ~= nil then
+    vim.api.nvim_create_autocmd({ 'BufEnter', 'BufWinEnter', 'BufRead' }, {
+        pattern = { qalc.config.attach_extension },
+        command = 'QalcAttach',
+    })
+end

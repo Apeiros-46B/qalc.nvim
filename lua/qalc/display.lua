@@ -32,11 +32,13 @@ local function update_vtext(namespace, bufnr, config, results)
         -- make sure line is non-empty
         if result ~= '' then
             -- {{{ set extmark
+            local show_sign = config.show_sign and config.sign ~= '' and config.sign ~= nil
+
             vim.api.nvim_buf_set_extmark(bufnr, namespace, linenum - 1, 0, {
                 -- text
                 virt_text = {
                     -- sign
-                    (config.show_sign and {
+                    (show_sign and {
                         config.sign .. ' ',
                         config.highlights.sign
                     } or nil),
