@@ -2,24 +2,24 @@
 
 *inspired by [quickmath.nvim](https://github.com/jbyuki/quickmath.nvim)*
 
-A Neovim plugin that creates/attaches to a buffer and runs [the `qalc` CLI program](https://github.com/Qalculate/libqalculate) on the contents
+A Neovim frontend for the [the `qalc` CLI program](https://github.com/Qalculate/libqalculate)
 
 ![screenshot](assets/screenshot.png)
 
 ## Features
 
-- Automatically evaluates [`qalc`](https://github.com/Qalculate/libqalculate) commands in a Neovim buffer and shows results in virtual text
-- Shows warnings and errors as Neovim diagnostics
+- Evaluates `qalc` commands in a Neovim buffer and updates results in virtual text on buffer content change
+- Shows warnings and errors from commands as Neovim diagnostics
 
 ## Installation
 
-Requires the [`qalc`](https://github.com/Qalculate/libqalculate) binary executable and in `PATH`.
+Requires the `qalc` binary executable and in `PATH`.
 
 Install using your preferred plugin manager:
 
 - [vim-plug](https://github.com/junegunn/vim-plug)
 ```vim
-Plug 'Apeiros-46B/qalc.nvim'
+Plug "Apeiros-46B/qalc.nvim"
 ```
 
 - [packer.nvim](https://github.com/wbthomason/packer.nvim)
@@ -34,17 +34,19 @@ The `:Qalc` command optionally accepts one argument; the name of the newly creat
 
 Alternatively, you can attach to an existing buffer using `:QalcAttach`.
 
-All commands accepted in the buffer are simply [`qalc`](https://github.com/Qalculate/libqalculate) commands.
+All commands accepted in the buffer are `qalc` commands.
 
 ## Configuration
 
-To configure, call the `setup` function
+To configure, call the `setup` function.
 
 ```lua
 require('qalc').setup({
     -- your config goes here
 })
 ```
+
+Keep in mind that this plugin is still under development so configuration keys may change or be removed at any time.
 
 <details>
   <summary>Default configuration</summary>
@@ -98,11 +100,14 @@ require('qalc').setup({
   ```
 </details>
 
-## Planned Features
+## Planned Changes
 
-List of features I will most likely implement in the near future (if I have enough free time)
+The following is a list of things I will most likely change/implement in the near future (if I have enough free time).  
+Items are ordered by priority.
 
-- Keyboard shortcut to copy result
-- Syntax highlighting
-- Less buggy parser (especially for `set` command)
-- (Long-term) [nvim-cmp](https://github.com/hrsh7th/nvim-cmp) integration for completion of variables, functions, and units
+- (perf) Keeping the `qalc` process alive instead of calling it on every buffer update
+- (perf) Only recalculating what is necessary instead of recalculating the whole buffer on every update
+- (feat) Adding a keyboard shortcut to copy result
+- (fix) Fixing `set` and related commands breaking virtual text and diagnostics if used at the beginning of the buffer
+- (feat) Adding custom syntax highlighting (long-term)
+- (feat) Adding [nvim-cmp](https://github.com/hrsh7th/nvim-cmp) integration for completion of variables, functions, and units (long-term)
