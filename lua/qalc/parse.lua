@@ -167,9 +167,6 @@ local function prepare_results(results)
             -- make it easier to parse
             new_results[i] = 'npwarning: ' .. result
             table.insert(new_results, i + 1, '')
-        elseif string.find(result, '^save') ~= nil then
-            -- shouldn't show result, we are saving a variable
-            new_results[i] = ''
         elseif string.find(result, '=') == nil then
             -- there are no equals signs
             new_results[i] = result
