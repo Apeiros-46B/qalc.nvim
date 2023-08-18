@@ -1,8 +1,13 @@
 -- displays parsed results in the form of virtual text and diagnostics
 
+-- lines are 1-indexed
+-- vtexts[bufnr][lnum]
+local vtexts = {}
+
 -- {{{ clear
 -- virtual text
 local function clear_vtext(namespace, bufnr)
+    vtexts[bufnr] = nil
     vim.api.nvim_buf_clear_namespace(bufnr, namespace, 0, -1)
 end
 
@@ -23,18 +28,21 @@ end
 local function update_vtext(namespace, bufnr, config, results)
     -- clear existing virtual text
     clear_vtext(namespace, bufnr)
+    vtexts[bufnr] = {}
 
     -- exit if no results
     if #results == 0 then return end
 
     -- {{{ iterate over results
-    for linenum, result in pairs(results) do
+    for lnum, result in pairs(results) do
         -- make sure line is non-empty
         if result ~= '' then
             -- {{{ set extmark
             local show_sign = config.show_sign and config.sign ~= '' and config.sign ~= nil
 
-            vim.api.nvim_buf_set_extmark(bufnr, namespace, linenum - 1, 0, {
+            vtexts[bufnr][lnum] = result
+
+            vim.api.nvim_buf_set_extmark(bufnr, namespace, lnum - 1, 0, {
                 -- text
                 virt_text = {
                     -- sign
@@ -76,6 +84,8 @@ end
 
 -- {{{ return module
 return {
+    vtexts = vtexts,
+
     -- {{{ clear
     clear = {
         all = clear_all,

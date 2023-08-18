@@ -24,6 +24,14 @@ local config = {
     -- set to '' or nil to disable automatic attaching
     attach_extension = '*.qalc', -- string?
 
+    -- default register to yank results to
+    -- default register = '@', '', or nil
+    -- clipboard        = '+'
+    -- X11 selection    = '*'
+    -- other registers not listed are also supported
+    -- see `:h setreg()`
+    yank_default_register = nil, -- string?
+
     -- sign shown before result
     sign = '=', -- string
 
@@ -139,6 +147,16 @@ end
 -- }}}
 -- }}}
 
+-- {{{ yank results
+local function yank(bufnr, register)
+    local lnum = vim.api.nvim_win_get_cursor(0)[1]
+    local val = require('qalc.display').vtexts[bufnr][lnum]
+    if val ~= nil then
+        vim.fn.setreg(register, val)
+    end
+end
+-- }}}
+
 -- {{{ return module
 return {
     -- config
@@ -159,5 +177,13 @@ return {
         buf = detach,
         current = function() detach(vim.api.nvim_get_current_buf()) end,
     },
+
+    -- yank
+    yank = {
+        buf = yank,
+        current = function(register)
+            yank(vim.api.nvim_get_current_buf(), register)
+        end,
+    }
 }
 -- }}}
