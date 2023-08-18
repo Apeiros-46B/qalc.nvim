@@ -26,7 +26,7 @@ vim.api.nvim_create_user_command('QalcYank',
 -- }}}
 
 -- automatically attach to files with extension set in config
-if qalc.config.attach_extension ~= '' and qalc.config.attach_extension ~= nil then
+if qalc.config.attach_extension ~= '' then
     vim.api.nvim_create_autocmd({ 'BufEnter', 'BufWinEnter', 'BufRead' }, {
         pattern = { qalc.config.attach_extension },
         command = 'QalcAttach',
