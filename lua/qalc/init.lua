@@ -6,31 +6,31 @@ local namespace = vim.api.nvim_create_namespace('qalc')
 -- {{{ config & setup
 -- {{{ default configuration
 local config = {
-    -- default name of a newly opened buffer
-    -- set to '' or nil to open an unnamed buffer
-    bufname = nil, -- string?
-
     -- extra command arguments for Qalculate
     -- do NOT use the option `-t`/`--terse`; it will break the plugin
     -- example: { '--set', 'angle deg' } to use degrees as the default angle unit
-    cmd_args = nil, -- table?
+    cmd_args = {}, -- table
+
+    -- default name of a newly opened buffer
+    -- set to '' to open an unnamed buffer
+    bufname = '', -- string
 
     -- the plugin will set all attached buffers to have this filetype
-    -- set to '' or nil to disable setting the filetype
+    -- set to '' to disable setting the filetype
     -- the default is provided for basic syntax highlighting
-    set_ft = 'config', -- string?
+    set_ft = 'config', -- string
 
     -- file extension to automatically attach qalc to
-    -- set to '' or nil to disable automatic attaching
-    attach_extension = '*.qalc', -- string?
+    -- set to '' to disable automatic attaching
+    attach_extension = '*.qalc', -- string
 
     -- default register to yank results to
-    -- default register = '@', '', or nil
+    -- default register = '@'
     -- clipboard        = '+'
     -- X11 selection    = '*'
     -- other registers not listed are also supported
     -- see `:h setreg()`
-    yank_default_register = nil, -- string?
+    yank_default_register = '@', -- string
 
     -- sign shown before result
     sign = '=', -- string
@@ -63,7 +63,7 @@ local config = {
 -- {{{ setup function
 local function setup(new_config)
     -- extend default config with new keys
-    config = vim.tbl_deep_extend('force', config, new_config)
+    require('qalc.util').tbl_deep_extend(config, new_config)
 
     -- setup diagnostic options for our namespace
     if config.diagnostics ~= nil then
@@ -129,7 +129,9 @@ local function attach(bufnr)
     vim.api.nvim_buf_attach(0, false, { on_lines = callback })
 
     -- set the filetype to desired one
-    vim.bo.filetype = config.set_ft
+    if config.set_ft ~= '' then
+        vim.bo.filetype = config.set_ft
+    end
 
     -- add bufnr to attached table
     attached[bufnr] = true
