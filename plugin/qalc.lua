@@ -15,6 +15,14 @@ vim.api.nvim_create_user_command('Qalc',
 
 -- QalcAttach
 vim.api.nvim_create_user_command('QalcAttach', function(_) qalc.attach.current() end, { nargs = 0 })
+
+-- QalcYank
+vim.api.nvim_create_user_command('QalcYank',
+    function(tbl)
+        qalc.yank.current(tbl.fargs[1] or qalc.config.yank_default_register or '')
+    end,
+    { nargs = '?' }
+)
 -- }}}
 
 -- automatically attach to files with extension set in config

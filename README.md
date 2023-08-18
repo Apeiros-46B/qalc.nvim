@@ -34,6 +34,8 @@ The `:Qalc` command optionally accepts one argument; the name of the newly creat
 
 Alternatively, you can attach to an existing buffer using `:QalcAttach`.
 
+You can yank the result on the current line with `:QalcYank`, which takes an optional register (see `:h setreg()`). The default register can be configured (see below).
+
 All commands accepted in the buffer are `qalc` commands.
 
 ## Configuration
@@ -71,6 +73,14 @@ Keep in mind that this plugin is still under development so configuration keys m
       -- set to '' or nil to disable automatic attaching
       attach_extension = '*.qalc', -- string?
 
+      -- default register to yank results to
+      -- default register = '@', '', or nil
+      -- clipboard        = '+'
+      -- X11 selection    = '*'
+      -- other registers not listed are also supported
+      -- see `:h setreg()`
+      yank_default_register = nil, -- string?
+
       -- sign shown before result
       sign = '=', -- string
 
@@ -107,7 +117,6 @@ Items are ordered by priority.
 
 - (perf) Keeping the `qalc` process alive instead of calling it on every buffer update
 - (perf) Only recalculating what is necessary instead of recalculating the whole buffer on every update
-- (feat) Adding a keyboard shortcut to copy result
 - (fix) Fixing `set` and related commands breaking virtual text and diagnostics if used at the beginning of the buffer
 - (feat) Adding custom syntax highlighting (long-term)
 - (feat) Adding [nvim-cmp](https://github.com/hrsh7th/nvim-cmp) integration for completion of variables, functions, and units (long-term)
