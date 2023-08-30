@@ -19,7 +19,7 @@ vim.api.nvim_create_user_command('QalcAttach', function(_) qalc.attach.current()
 -- QalcYank
 vim.api.nvim_create_user_command('QalcYank',
     function(tbl)
-        qalc.yank.current(tbl.fargs[1] or qalc.config.yank_default_register or '')
+        qalc.yank.current(tbl.args or qalc.config.yank_default_register or '')
     end,
     { nargs = '?' }
 )
