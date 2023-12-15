@@ -112,11 +112,11 @@ Keep in mind that this plugin is still under development so configuration keys m
 
 ## Planned Changes
 
-The following is a list of things I will most likely change/implement in the near future (if I have enough free time).  
+The following is a list of things I will most likely change/implement in the near future (when I have enough free time).  
 Items are ordered by priority.
 
+- (fix) Preventing commands that output nothing or more than 1 line from breaking subsequent results display
 - (perf) Keeping the `qalc` process alive instead of calling it on every buffer update
 - (perf) Only recalculating what is necessary instead of recalculating the whole buffer on every update
-- (fix) Fixing `set` and related commands breaking virtual text and diagnostics if used at the beginning of the buffer
 - (feat) Adding custom syntax highlighting (long-term)
 - (feat) Adding [nvim-cmp](https://github.com/hrsh7th/nvim-cmp) integration for completion of variables, functions, and units (long-term)
