@@ -33,6 +33,7 @@ end
 local function detach(bufnr)
 	attached[bufnr] = false
 	results[bufnr] = nil
+	bridge.kill(bufnr)
 	output.clear(ns)
 end
 -- }}}
@@ -50,7 +51,7 @@ local function attach(bufnr)
 	detach_queue[bufnr] = nil
 	vim.fn.bufload(bufnr)
 
-	local function cb()
+	local function cb(_, _, _, first, last)
 		if detach_queue[bufnr] then
 			detach(bufnr)
 
@@ -59,7 +60,7 @@ local function attach(bufnr)
 		end
 
 		local input = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-		local res = bridge.run(bufnr, input)
+		local res = bridge.run(bufnr, input, first, last)
 
 		output.render(ns, res)
 		results[bufnr] = res
