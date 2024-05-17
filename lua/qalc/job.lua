@@ -11,14 +11,14 @@ local function start(input, config, callback)
         {
             on_stdout = callback,
             stdout_buffered = true,
-            pty = true,
+            pty = config.use_pty
         }
     )
     -- }}}
 
     -- {{{ send input to job
     -- add EOF as last entry of contents
-    input[#input+1] = [[]]
+    input[#input+1] = config.eof
 
     -- send input
     vim.fn.chansend(jobid, input)
@@ -47,7 +47,7 @@ local function run(namespace, input, config)
         local bufnr = vim.api.nvim_get_current_buf()
 
         -- parse output
-        local parsed = parser.results(bufnr, raw_output, new_input, illegal)
+        local parsed = parser.results(bufnr, raw_output, new_input, illegal, config)
 
         -- display results
         require('qalc.display').update.all(namespace, bufnr, config, parsed)

@@ -133,14 +133,15 @@ local function get_results(raw_output, input_length)
 
     -- iterate over lines of raw output starting from input index
     for i = input_length, #raw_output do
-        -- add result to results table
-        results[#results+1] = raw_output[i]
+      -- add result to results table
+      results[#results+1] = raw_output[i]
     end
     -- }}}
 
     -- {{{ trim leading and trailing spaces
     for i, v in pairs(results) do
         -- remove
+        v = string.gsub(v, '\\r$', '') -- trailing CR (left from CRLF on Win32)
         v = string.gsub(v, '^%s+', '') -- leading
         v = string.gsub(v, '%s+$', '') -- trailing
 
@@ -234,13 +235,13 @@ end
 -- }}}
 
 -- {{{ parse results
-local function parse_results(bufnr, raw_output, inputs, illegal)
+local function parse_results(bufnr, raw_output, inputs, illegal, config)
     -- {{{ prepare
     -- create table
     local parsed = { results = {}, diagnostics = {} }
 
     -- get only the results
-    local results = get_results(raw_output, #inputs)
+    local results = get_results(raw_output, config.pty and #inputs or 1)
     results[#results] = nil -- remove last newline
     results = prepare_results(results) -- make terse
 
