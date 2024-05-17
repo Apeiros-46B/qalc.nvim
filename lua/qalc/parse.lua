@@ -133,8 +133,8 @@ local function get_results(raw_output, input_length)
 
     -- iterate over lines of raw output starting from input index
     for i = input_length, #raw_output do
-      -- add result to results table
-      results[#results+1] = raw_output[i]
+        -- add result to results table
+        results[#results+1] = raw_output[i]
     end
     -- }}}
 
