@@ -167,12 +167,12 @@ local function prepare_results(results)
             -- make it easier to parse
             new_results[i] = 'npwarning: ' .. result
             table.insert(new_results, i + 1, '')
-        elseif string.find(result, '=') == nil then
+        elseif string.find(result, '[≈=]') == nil then
             -- there are no equals signs
             new_results[i] = result
         else
             -- match everything after last equals sign
-            new_results[i] = string.match(result, '= ([^=]*)$')
+            new_results[i] = string.match(result, '[≈=] ([^≈=]*)$')
         end
     end
 
