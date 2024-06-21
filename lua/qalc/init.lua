@@ -80,7 +80,7 @@ end
 -- }}}
 
 -- {{{ create a buffer
-local function new_buf(name)
+local function new_buf(name, scratch)
     -- get command
     local cmd = 'enew'
 
@@ -88,6 +88,10 @@ local function new_buf(name)
         cmd = 'e ' .. name
     elseif config.bufname ~= '' and config.bufname ~= nil then
         cmd = 'e ' .. config.bufname
+    end
+
+    if scratch then
+        cmd = cmd .. ' | setlocal buftype=nofile bufhidden=hide noswapfile'
     end
 
     -- run command
