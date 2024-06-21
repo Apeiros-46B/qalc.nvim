@@ -6,11 +6,11 @@ local qalc = require('qalc')
 vim.api.nvim_create_user_command('Qalc',
     function(tbl)
         -- create a new buffer and attach to it
-        qalc.new_buf(tbl.args)
+        qalc.new_buf(tbl.args, tbl.bang)
         qalc.attach.current()
     end,
     -- 0 or 1 args
-    { nargs = '?' }
+    { nargs = '?', bang = true }
 )
 
 -- QalcAttach
