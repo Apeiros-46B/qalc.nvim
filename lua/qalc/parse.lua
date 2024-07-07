@@ -241,7 +241,7 @@ local function parse_results(bufnr, raw_output, inputs, illegal, config)
     local parsed = { results = {}, diagnostics = {} }
 
     -- get only the results
-    local results = get_results(raw_output, config.pty and #inputs or 1)
+    local results = get_results(raw_output, config.use_pty and #inputs or 1)
     results[#results] = nil -- remove last newline
     results = prepare_results(results) -- make terse
 

@@ -108,7 +108,7 @@ Keep in mind that this plugin is still under development so configuration keys m
       },
 
       -- use pty for job communication (MS Windows w/o WSL do not support pty)
-      use_pty = not (vim.fn.has('win32') == 1) and (vim.fn.has('wsl') == 0),
+      use_pty = not ((vim.fn.has('win32') == 1) and (vim.fn.has('wsl') == 0)),
 
       -- End-Of-File character (MS Windows uses ^Z (EOF), others use ^D (EOT))
       eof = string.char(((vim.fn.has('win32') == 1) and (vim.fn.has('wsl') == 0)) and 26 or 4)

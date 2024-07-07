@@ -59,7 +59,7 @@ local config = {
     },
 
     -- use pty for job communication (MS Windows w/o WSL do not support pty)
-    use_pty = not (vim.fn.has('win32') == 1) and (vim.fn.has('wsl') == 0),
+    use_pty = not ((vim.fn.has('win32') == 1) and (vim.fn.has('wsl') == 0)),
 
     -- End-Of-File character (windows uses ^Z (EOF), others use ^D (EOT))
     eof = string.char(((vim.fn.has('win32') == 1) and (vim.fn.has('wsl') == 0)) and 26 or 4)
@@ -80,7 +80,7 @@ end
 -- }}}
 
 -- {{{ create a buffer
-local function new_buf(name)
+local function new_buf(name, scratch)
     -- get command
     local cmd = 'enew'
 
@@ -88,6 +88,10 @@ local function new_buf(name)
         cmd = 'e ' .. name
     elseif config.bufname ~= '' and config.bufname ~= nil then
         cmd = 'e ' .. config.bufname
+    end
+
+    if scratch then
+        cmd = cmd .. ' | setlocal buftype=nofile bufhidden=hide noswapfile'
     end
 
     -- run command
