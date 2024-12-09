@@ -54,7 +54,7 @@ local cfg = {
 
 -- {{{ validate config
 local function validate()
-	for k, arg in cfg.cmd_args do
+	for k, arg in pairs(cfg.cmd_args) do
 		if arg == '-t' or arg == '--terse' then
 			vim.notify(
 				"The '--terse' flag is not necessary and not supported by qalc.nvim.",
