@@ -62,7 +62,7 @@ local function attach(bufnr)
 		local input = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 		local res = bridge.run(bufnr, input, first, last)
 
-		output.render(ns, res)
+		output.render(bufnr, res)
 		results[bufnr] = res
 	end
 
