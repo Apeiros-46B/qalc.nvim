@@ -8,52 +8,44 @@ extern "C" {
 
 #include <libqalculate/qalculate.h>
 
+#include <iostream>
+
 static const char* meta = "libqalcbridge.Calculator";
 
 // called from lua directly
 int calc::init(lua_State* L) {
-	Calculator** calc = static_cast<Calculator**>(lua_newuserdata(L, sizeof *calc));
+	// "handle" value (userdata) returned back to Lua.
+	// when this value is no longer reachable, the calculator is freed.
+	// we need to do this instead of implementing a destructor on specific Calculator instances because libqalculate for some reason sets a global CALCULATOR singleton when you instantiate a calculator, and if you try to free more than one instance of a Calculator, it results in a double free somewhere.
+	auto calc_handle = lua_newuserdata(L, 1);
 	luaL_setmetatable(L, meta);
 
-	*calc = new Calculator();
-	(**calc).loadExchangeRates();
-	(**calc).loadGlobalDefinitions();
+	new Calculator();
+	CALCULATOR->loadExchangeRates();
+	CALCULATOR->loadGlobalDefinitions();
 
 	return 1;
-}
-
-// called from lua via __gc
-static int deinit(lua_State* L) {
-	auto calc = static_cast<Calculator**>(luaL_checkudata(L, -1, meta));
-	delete *calc;
-	return 0;
 }
 
 // called from lua directly
-static int eval(lua_State* L) {
-	auto calc = static_cast<Calculator**>(luaL_checkudata(L, -2, meta));
+int calc::eval(lua_State* L) {
 	const char* input = luaL_checkstring(L, -1);
-	lua_pushstring(L, (**calc).calculateAndPrint(input, 2000).c_str());
+	lua_pushstring(L, CALCULATOR->calculateAndPrint(input, 2000).c_str());
 	return 1;
 }
-
-static const luaL_Reg calculator_mt[] = {
-	{ "__gc", deinit },
-	{ "eval", eval },
-	{ nullptr, nullptr }
-};
 
 // called from library
 void calc::init_metatables(lua_State* L) {
 	luaL_newmetatable(L, meta);
 
-	// mt.__index = mt
-	lua_pushstring(L, "__index");
-	lua_pushvalue(L, -2);
+	// create a destructor for 
+	lua_pushstring(L, "__gc");
+	lua_pushcfunction(L, [](lua_State* L) {
+		delete CALCULATOR;
+		std::cout << "C++: freed calculator" << std::endl;
+		return 1;
+	});
 	lua_settable(L, -3);
-
-	// mt.x = y for all x, y pairs where y is a function in calculator_mt
-	luaL_setfuncs(L, calculator_mt, 0);
 
 	lua_pop(L, 1);
 }
