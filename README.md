@@ -2,29 +2,32 @@
 
 *inspired by [quickmath.nvim](https://github.com/jbyuki/quickmath.nvim)*
 
-A Neovim frontend for the [the `qalc` CLI program](https://github.com/Qalculate/libqalculate)
+A Neovim plugin for quick "reactive" calculations with unit conversions, equation solving, basic calculus functionality, and more. Powered by [`libqalculate`](https://github.com/Qalculate/libqalculate).
 
 ![screenshot](assets/screenshot.png)
 
 ## Features
 
-- Evaluates `qalc` commands in a Neovim buffer and updates results in virtual text on buffer content change
-- Shows warnings and errors from commands as Neovim diagnostics
+- Evaluates expressions in a Neovim buffer and updates results in virtual text on buffer content change
+- Shows warnings and errors from expressions as Neovim diagnostics
 
 ## Installation
 
-Requires the `qalc` binary executable and in `PATH`.
+Requires `libqalculate` and `luajit` to be installed and accessible as libraries.
 
 Install using your preferred plugin manager:
 
 - [vim-plug](https://github.com/junegunn/vim-plug)
 ```vim
-Plug "Apeiros-46B/qalc.nvim"
+Plug 'Apeiros-46B/qalc.nvim', { 'do': './build' }
 ```
 
-- [packer.nvim](https://github.com/wbthomason/packer.nvim)
+- [lazy.nvim](https://github.com/folke/lazy.nvim)
 ```lua
-use 'Apeiros-46B/qalc.nvim'
+{
+    'Apeiros-46B/qalc.nvim',
+    build = './build',
+}
 ```
 
 ## Usage
@@ -52,6 +55,8 @@ Keep in mind that this plugin is still under development so configuration keys m
 
 <details>
   <summary>Default configuration</summary>
+
+  TODO: update this section when configuration is finalized
 
   ```lua
   local config = {
@@ -112,11 +117,10 @@ Keep in mind that this plugin is still under development so configuration keys m
 
 ## Planned Changes
 
-The following is a list of things I will most likely change/implement in the near future (when I have enough free time).  
-Items are ordered by priority.
+The following is a list of things I will most likely change/implement in the future (when I have enough free time). Items are ordered by priority, descending.
 
-- (fix) Preventing commands that output nothing or more than 1 line from breaking subsequent results display
-- (perf) Keeping the `qalc` process alive instead of calling it on every buffer update
+- (feat) Re-implementing the functionality of the `qalc` CLI commands such as "set" and "delete"
+- (perf) Make recalculation async instead of blocking the main thread
 - (perf) Only recalculating what is necessary instead of recalculating the whole buffer on every update
-- (feat) Adding custom syntax highlighting (long-term)
-- (feat) Adding [nvim-cmp](https://github.com/hrsh7th/nvim-cmp) integration for completion of variables, functions, and units (long-term)
+- (feat) Adding fancy visual effect (optional) when values are recalculated
+- (feat) Adding [nvim-cmp](https://github.com/hrsh7th/nvim-cmp) integration for completion of variables, functions, and units

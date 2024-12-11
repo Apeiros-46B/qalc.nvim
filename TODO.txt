@@ -1,0 +1,7 @@
+TODO before merging rewrite->main
+- get cross-platform library build working (should not resort to binary distribution)
+	- put it in a ./build script and make sure it's cross platform
+	- clarify compatibility requirements in readme
+- fix :QalcYank
+- currently there is an issue when typing in a variable assignment, and then deleting it. the variable persists (e.g. type x=10, delete the line, then x is still 10)
+- need to test functionality with multiple buffers

@@ -8,6 +8,9 @@ extern "C" {
 
 #include <libqalculate/qalculate.h>
 
+#include <algorithm>
+#include <cctype>
+#include <string>
 #include <iostream>
 
 static const char* meta = "libqalcbridge.Calculator";
@@ -49,9 +52,10 @@ int calc::eval(lua_State* L) {
 	lua_getfield(L, -2, "warn_msgs"); // -3
 	lua_getfield(L, -3, "info_msgs"); // -2
 
-	int info_i = 0;
-	int warn_i = 0;
-	int err_i = 0;
+	// lua is 1-indexed
+	int info_i = 1;
+	int warn_i = 1;
+	int err_i = 1;
 	CalculatorMessage* msg;
 
 	while ((msg = CALCULATOR->message()) != nullptr) {
@@ -70,6 +74,25 @@ int calc::eval(lua_State* L) {
 	lua_pop(L, 3);
 
 	return 1;
+}
+
+int calc::reset(lua_State* L) {
+	CALCULATOR->reset();
+	return 0;
+}
+
+int calc::load_defs(lua_State* L) {
+	const char* file = luaL_checkstring(L, -1);
+	CALCULATOR->loadDefinitions(file, true, false);
+	return 0;
+}
+
+int calc::save_defs(lua_State* L) {
+	const char* file = luaL_checkstring(L, -1);
+	CALCULATOR->saveVariables(file, false);
+	CALCULATOR->saveUnits(file, false);
+	CALCULATOR->saveFunctions(file, false);
+	return 0;
 }
 
 // called from library

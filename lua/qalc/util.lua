@@ -1,10 +1,10 @@
--- extends dest with src (with mutation, unlike vim.tbl_deep_extend 'force')
-local function deep_extend(dest, src)
+-- utility functions
+local function deep_extend_inplace(dest, src)
 	for k, v in pairs(src) do
 		if type(v) ~= 'table' then
 			dest[k] = v
 		else
-			deep_extend(dest[k], v)
+			deep_extend_inplace(dest[k], v)
 		end
 	end
 end
@@ -27,6 +27,6 @@ local function with_nil_variant(f, s)
 end
 
 return {
-	deep_extend      = deep_extend,
-	with_nil_variant = with_nil_variant,
+	deep_extend_inplace = deep_extend_inplace,
+	with_nil_variant    = with_nil_variant,
 }
