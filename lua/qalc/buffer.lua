@@ -1,5 +1,4 @@
 -- handle buffer creation, attach/detach, and yanking result
-local ns = vim.api.nvim_create_namespace('qalc')
 local cfg = require('qalc.config').cfg
 local bridge = require('qalc.bridge')
 local output = require('qalc.output')
@@ -33,8 +32,8 @@ end
 local function detach(bufnr)
 	attached[bufnr] = false
 	results[bufnr] = nil
-	bridge.kill(bufnr)
-	output.clear(ns)
+	bridge.clear_defs(bufnr)
+	output.clear(bufnr)
 end
 -- }}}
 
@@ -53,17 +52,17 @@ local function attach(bufnr)
 
 	local function cb(_, _, _, first, last)
 		if detach_queue[bufnr] then
+			detach_queue[bufnr] = nil
 			detach(bufnr)
 
 			-- detach from nvim_buf_attach
 			return true
 		end
 
-		local input = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-		local res = bridge.run(bufnr, input, first, last)
-
-		output.render(bufnr, res)
-		results[bufnr] = res
+		first = first or 0
+		local result = bridge.eval(bufnr, first, last)
+		output.render(bufnr, result, first)
+		results[bufnr] = result
 	end
 
 	cb() -- update once now
@@ -71,6 +70,10 @@ local function attach(bufnr)
 	attached[bufnr] = true
 
 	vim.bo.filetype = 'qalc'
+end
+
+local function is_attached(bufnr)
+	return attached[bufnr]
 end
 -- }}}
 
@@ -89,8 +92,9 @@ end
 local with_nil_variant = require('qalc.util').with_nil_variant
 
 return {
-	new_buf = new_buf,
-	attach  = with_nil_variant(attach, 'current'),
-	detach  = with_nil_variant(queue_detach, 'current'),
-	yank    = with_nil_variant(yank, 'current'),
+	new_buf     = new_buf,
+	is_attached = with_nil_variant(is_attached, 'current'),
+	attach      = with_nil_variant(attach, 'current'),
+	detach      = with_nil_variant(queue_detach, 'current'),
+	yank        = with_nil_variant(yank, 'current'),
 }

@@ -1,4 +1,6 @@
 local lib = require('libqalcbridge')
 
 lib.init()
-print(vim.inspect(lib.eval('solve(x^2 = -4)')))
+local now = os.clock()
+print(vim.inspect(lib.eval('# this is a comment')))
+print("elapsed:", os.clock() - now)

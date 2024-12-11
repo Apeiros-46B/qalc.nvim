@@ -7,14 +7,16 @@ extern "C" {
 }
 
 static const luaL_Reg functions[] = {
-	{ "init", calc::init },
-	{ "eval", calc::eval },
-	{ nullptr, nullptr }
+	{ "init",      calc::init      },
+	{ "eval",      calc::eval      },
+	{ "reset",     calc::reset     },
+	{ "load_defs", calc::load_defs },
+	{ "save_defs", calc::save_defs },
+	{ nullptr,     nullptr         }
 };
 
 extern "C" int luaopen_libqalcbridge(lua_State* L) {
 	calc::init_metatables(L);
 	luaL_newlib(L, functions);
-
 	return 1;
 }
