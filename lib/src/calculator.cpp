@@ -30,7 +30,45 @@ int calc::init(lua_State* L) {
 // called from lua directly
 int calc::eval(lua_State* L) {
 	const char* input = luaL_checkstring(L, -1);
+
+	lua_createtable(L, 0, 4);
+
 	lua_pushstring(L, CALCULATOR->calculateAndPrint(input, 2000).c_str());
+	lua_setfield(L, -2, "result");
+
+	lua_createtable(L, 2, 0);
+	lua_setfield(L, -2, "info_msgs");
+
+	lua_createtable(L, 2, 0);
+	lua_setfield(L, -2, "warn_msgs");
+
+	lua_createtable(L, 2, 0);
+	lua_setfield(L, -2, "err_msgs");
+
+	lua_getfield(L, -1, "err_msgs");  // -4
+	lua_getfield(L, -2, "warn_msgs"); // -3
+	lua_getfield(L, -3, "info_msgs"); // -2
+
+	int info_i = 0;
+	int warn_i = 0;
+	int err_i = 0;
+	CalculatorMessage* msg;
+
+	while ((msg = CALCULATOR->message()) != nullptr) {
+		lua_pushstring(L, msg->c_message());
+		switch (msg->type()) {
+			case MESSAGE_INFORMATION:
+				lua_rawseti(L, -2, info_i++); break;
+			case MESSAGE_WARNING:
+				lua_rawseti(L, -3, warn_i++); break;
+			case MESSAGE_ERROR:
+				lua_rawseti(L, -4, err_i++); break;
+		}
+		CALCULATOR->nextMessage();
+	}
+
+	lua_pop(L, 3);
+
 	return 1;
 }
 
@@ -38,14 +76,9 @@ int calc::eval(lua_State* L) {
 void calc::init_metatables(lua_State* L) {
 	luaL_newmetatable(L, meta);
 
-	// create a destructor for 
-	lua_pushstring(L, "__gc");
-	lua_pushcfunction(L, [](lua_State* L) {
-		delete CALCULATOR;
-		std::cout << "C++: freed calculator" << std::endl;
-		return 1;
-	});
-	lua_settable(L, -3);
+	// create a destructor for the calculator singleton
+	lua_pushcfunction(L, [](lua_State* L) { delete CALCULATOR; return 0; });
+	lua_setfield(L, -2, "__gc");
 
 	lua_pop(L, 1);
 }
