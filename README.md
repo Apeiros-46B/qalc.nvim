@@ -21,10 +21,18 @@ Install using your preferred plugin manager:
 ```vim
 Plug 'Apeiros-46B/qalc.nvim', { 'do': { -> luafile build.lua } }
 ```
+If you use [Nix](https://nixos.org/), replace `build.lua` with `build_nix.lua`.
 
 - [lazy.nvim](https://github.com/folke/lazy.nvim)
 ```lua
 'Apeiros-46B/qalc.nvim'
+```
+If you use [Nix](https://nixos.org/), add a `build` entry:
+```lua
+{
+    'Apeiros-46B/qalc.nvim',
+    build = 'build_nix.lua',
+}
 ```
 
 ## Usage
