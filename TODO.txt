@@ -5,3 +5,4 @@ TODO before merging rewrite->main
 - fix :QalcYank
 - currently there is an issue when typing in a variable assignment, and then deleting it. the variable persists (e.g. type x=10, delete the line, then x is still 10)
 - need to test functionality with multiple buffers
+- add nix package? might as well go all in. right now we just have a build script that works on nix but isn't really "pure" (it's still designed for use with a traditional neovim config, just on a system with nix available)
