@@ -15,7 +15,8 @@ static const luaL_Reg functions[] = {
 	{ nullptr,     nullptr         }
 };
 
-extern "C" int luaopen_libqalcbridge(lua_State* L) {
+// in lua code, it is required as "qalc.lib" so this is named luaopen_qalc_lib
+extern "C" int luaopen_qalc_lib(lua_State* L) {
 	calc::init_metatables(L);
 	luaL_newlib(L, functions);
 	return 1;

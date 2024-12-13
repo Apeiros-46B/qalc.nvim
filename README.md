@@ -2,7 +2,7 @@
 
 *inspired by [quickmath.nvim](https://github.com/jbyuki/quickmath.nvim)*
 
-A Neovim plugin for quick "reactive" calculations with unit conversions, equation solving, basic calculus functionality, and more. Powered by [`libqalculate`](https://github.com/Qalculate/libqalculate).
+A Neovim plugin for live calculations with unit conversions, equation solving, basic calculus functionality, and more. Powered by [`libqalculate`](https://github.com/Qalculate/libqalculate).
 
 ![screenshot](assets/screenshot.png)
 
@@ -13,21 +13,18 @@ A Neovim plugin for quick "reactive" calculations with unit conversions, equatio
 
 ## Installation
 
-Requires `libqalculate` and `luajit` to be installed and accessible as libraries.
+Requires CMake, pkg-config, LuaJIT, and libqalculate to be installed.
 
 Install using your preferred plugin manager:
 
 - [vim-plug](https://github.com/junegunn/vim-plug)
 ```vim
-Plug 'Apeiros-46B/qalc.nvim', { 'do': './build' }
+Plug 'Apeiros-46B/qalc.nvim', { 'do': { -> luafile build.lua } }
 ```
 
 - [lazy.nvim](https://github.com/folke/lazy.nvim)
 ```lua
-{
-    'Apeiros-46B/qalc.nvim',
-    build = './build',
-}
+'Apeiros-46B/qalc.nvim'
 ```
 
 ## Usage

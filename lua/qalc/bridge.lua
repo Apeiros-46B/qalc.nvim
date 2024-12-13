@@ -1,5 +1,5 @@
 -- interface with Qalculate and return formatted results
-local lib = require('libqalcbridge')
+local lib = require('qalc.lib')
 
 local buffer_def_files = {}
 
