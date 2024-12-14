@@ -4,7 +4,7 @@ local ns = vim.api.nvim_create_namespace('qalc')
 -- {{{ default configuration
 local cfg = {
 	-- default name of a newly opened buffer
-	bufname = '', -- string or nil
+	bufname = '', -- string
 
 	-- default register to yank results to
 	-- default register = '@'
@@ -15,8 +15,8 @@ local cfg = {
 	yank_default_register = '@', -- string
 
 	display = {
-		-- sign shown before result
-		sign = '=', -- string?
+		-- sign shown before result (false to disable)
+		sign = '=', -- string or false
 
 		-- whether or not to right align virtual text
 		right_align = false, -- boolean
@@ -33,10 +33,9 @@ local cfg = {
 			result = '@string',  -- result in virtual text
 		},
 
-		-- diagnostic options
-		-- set to nil to respect the options in your Neovim configuration
+		-- diagnostic options (false to respect the options in your Neovim config)
 		-- (see `:h vim.diagnostic.config()`)
-		diagnostics = { -- table?
+		diagnostics = { -- table or false
 			underline = true,
 			virtual_text = false,
 			signs = true,
@@ -48,10 +47,19 @@ local cfg = {
 -- }}}
 
 -- {{{ setup with user overrides
-local function setup(new_cfg)
-	require('qalc.util').deep_extend_inplace(cfg, new_cfg)
+local function deep_extend_inplace(dest, src)
+	for k, v in pairs(src) do
+		if type(v) ~= 'table' then
+			dest[k] = v
+		else
+			deep_extend_inplace(dest[k], v)
+		end
+	end
+end
 
-	if cfg.diagnostics ~= nil then
+local function setup(new_cfg)
+	deep_extend_inplace(cfg, new_cfg)
+	if cfg.diagnostics ~= false then
 		vim.diagnostic.config(cfg.diagnostics, ns)
 	end
 end

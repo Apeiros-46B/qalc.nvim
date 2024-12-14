@@ -1,10 +1,9 @@
 -- handle buffer creation, attach/detach, and yanking result
 local cfg = require('qalc.config').cfg
-local bridge = require('qalc.bridge')
-local output = require('qalc.output')
 
 local attached = {}
-local detach_queue = {} -- more like a set
+-- mapping of bufnr -> bool, all buffers in this set should be detached from
+local detach_queue = {}
 local results = {}
 
 -- {{{ create buffer
@@ -13,7 +12,7 @@ local function new_buf(name)
 
 	if name ~= '' and name ~= nil then
 		cmd = 'e ' .. name
-	elseif cfg.bufname ~= '' and cfg.bufname ~= nil then
+	elseif cfg.bufname ~= '' then
 		cmd = 'e ' .. cfg.bufname
 	end
 
@@ -25,15 +24,18 @@ end
 local function queue_detach(bufnr)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 
-	-- referenced in nvim_buf_attach callback to actually detach
+	-- referenced in nvim_buf_attach callback to actually detach the callback
 	detach_queue[bufnr] = true
+
+	-- TODO: after detaching from a file and reattaching, all /global/ definitions are gone
+	require('qalc.bridge').clear_defs(bufnr)
+	require('qalc.output').clear(bufnr)
 end
 
 local function detach(bufnr)
-	attached[bufnr] = false
+	detach_queue[bufnr] = nil
 	results[bufnr] = nil
-	bridge.clear_defs(bufnr)
-	output.clear(bufnr)
+	attached[bufnr] = false
 end
 -- }}}
 
@@ -52,16 +54,13 @@ local function attach(bufnr)
 
 	local function cb(_, _, _, first, last)
 		if detach_queue[bufnr] then
-			detach_queue[bufnr] = nil
 			detach(bufnr)
-
-			-- detach from nvim_buf_attach
-			return true
+			return true -- actually detaches the callback
 		end
 
 		first = first or 0
-		local result = bridge.eval(bufnr, first, last)
-		output.render(bufnr, result, first)
+		local result = require('qalc.bridge').eval(bufnr, first, last)
+		require('qalc.output').render(bufnr, result, first)
 		results[bufnr] = result
 	end
 
@@ -78,7 +77,7 @@ end
 -- }}}
 
 -- {{{ yank results from current line
-local function yank(bufnr, register)
+local function yank(register, bufnr)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 
 	local lnum = vim.api.nvim_win_get_cursor(0)[1]
@@ -89,12 +88,10 @@ local function yank(bufnr, register)
 end
 -- }}}
 
-local with_nil_variant = require('qalc.util').with_nil_variant
-
 return {
 	new_buf     = new_buf,
-	is_attached = with_nil_variant(is_attached, 'current'),
-	attach      = with_nil_variant(attach, 'current'),
-	detach      = with_nil_variant(queue_detach, 'current'),
-	yank        = with_nil_variant(yank, 'current'),
+	is_attached = is_attached,
+	attach      = attach,
+	detach      = queue_detach,
+	yank        = yank,
 }

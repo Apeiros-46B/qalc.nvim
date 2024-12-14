@@ -1,23 +1,25 @@
 -- display Qalculate output to the user through virtual text and diagnostics
 local ns = vim.api.nvim_create_namespace('qalc')
-local util = require('qalc.util')
-
-local all_results = {}
+local cfg = require('qalc.config').cfg
 
 local function clear(bufnr)
 	vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
 	vim.diagnostic.reset(ns, bufnr)
 end
 
--- TODO: see todo at bridge.lua/eval()
-local function render(bufnr, result, first_lnum)
+local function render(bufnr, result, first)
 	clear(bufnr)
+
+	local sign = nil
+	if cfg.display.sign ~= false then
+		sign = { cfg.display.sign .. ' ', cfg.display.highlights.sign }
+	end
+
 	for lnum, value in pairs(result.values) do
 		vim.api.nvim_buf_set_extmark(bufnr, ns, lnum, 0, {
-			-- TODO obey config
 			virt_text = {
-				{ '= ', '@conceal' },
-				{ value, '@string' },
+				sign,
+				{ value, cfg.display.highlights.result },
 			},
 			virt_text_pos = 'eol',
 			hl_mode = 'combine',
