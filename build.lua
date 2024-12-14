@@ -6,17 +6,12 @@ vim.system({
 }):wait()
 vim.system({ 'cmake', '--build', './lib/build' }):wait()
 
-local ext
-if vim.fn.has('win32') ~= 0 then
-	ext = 'dll'
-elseif vim.fn.has('mac') ~= 0 then
-	ext = 'dylib'
-else
-	ext = 'so'
+-- not sure which extension is used, so we just make symlinks for all of them
+local exts = { 'dll', 'dylib', 'so' }
+for _, ext in ipairs(exts) do
+	local src = '../../lib/build/libqalcbridge.' .. ext
+	local dst = './lua/qalc/lib.' .. ext
+
+	vim.uv.fs_unlink(dst)
+	vim.uv.fs_symlink(src, dst)
 end
-
-local src = '../../lib/build/libqalcbridge.' .. ext
-local dst = './lua/qalc/lib.' .. ext
-
-vim.uv.fs_unlink(dst)
-vim.uv.fs_symlink(src, dst)
