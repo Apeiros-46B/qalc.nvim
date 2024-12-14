@@ -1,15 +1,11 @@
 vim.system({ 'bash', '-c', 'cd lib && nix build' }):wait()
 
-local ext
-if vim.fn.has('mac') ~= 0 then
-	ext = 'dylib'
-else
-	ext = 'so'
+-- not sure which extension is used, so we just make symlinks for all of them
+local exts = { 'dll', 'dylib', 'so' }
+for _, ext in ipairs(exts) do
+	local src = '../../lib/result/lib/libqalcbridge.' .. ext
+	local dst = './lua/qalc/lib.' .. ext
+
+	vim.uv.fs_unlink(dst)
+	vim.uv.fs_symlink(src, dst)
 end
-
--- TODO: not sure how nix works on mac
-local src = '../../lib/result/lib/libqalcbridge.' .. ext
-local dst = './lua/qalc/lib.' .. ext
-
-vim.uv.fs_unlink(dst)
-vim.uv.fs_symlink(src, dst)
