@@ -5,11 +5,11 @@
 	outputs =
 		{ nixpkgs, ... }:
 		let
-			# TODO: support more systems
+			# TODO: test on other systems
 			supportedSystems = [ "x86_64-linux" ];
 			forAllSystems =
 				file:
-				(nixpkgs.lib.genAttrs supportedSystems (system: 
+				(nixpkgs.lib.genAttrs supportedSystems (system:
 				let
 					pkgs = (import nixpkgs { inherit system; });
 				in

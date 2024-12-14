@@ -1,6 +1,9 @@
 -- interface with Qalculate and return formatted results
 local lib = require('qalc.lib')
 
+-- the `Calculator` object on C++'s side is deallocated when this is `__gc`ed
+local calc_handle = lib.init()
+
 local buffer_def_files = {}
 
 local function load_defs(bufnr)
@@ -45,8 +48,8 @@ local function push_diagnostic(l, bufnr, lnum, severity, message)
 	l[#l+1] = new
 end
 
--- TODO: more intelligently recalclate instead of recalclating the entire buffer
-local function eval(bufnr, first, _)
+-- TODO: more intelligently recalculate instead of recalclating the entire buffer
+local function eval(bufnr, first, last)
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 	local result = {
 		values = {},
@@ -79,8 +82,9 @@ local function eval(bufnr, first, _)
 end
 
 return {
-	eval       = eval,
-	load_defs  = load_defs,
-	save_defs  = save_defs,
-	clear_defs = clear_defs,
+	eval          = eval,
+	load_defs     = load_defs,
+	save_defs     = save_defs,
+	clear_defs    = clear_defs,
+	__calc_handle = calc_handle,
 }

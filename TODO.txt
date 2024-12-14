@@ -1,7 +1,5 @@
 TODO before merging rewrite->main
 - write cmake package for libqalculate, that way we don't have to rely on pkg-config
-- slightly revert architecture, make plugin/qalc.lua only `require` lua/qalc/commands.lua instead of the whole init
-	- saves a bit of startuptime, the old plugin was like 0.6ms, currently it's around 6ms (ignoring the lib.init() call)
 - fix :QalcYank
 - currently there is an issue when typing in a variable assignment, and then deleting it. the variable persists (e.g. type x=10, delete the line, then x is still 10)
 - need to test functionality with multiple buffers
