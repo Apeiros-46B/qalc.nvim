@@ -44,6 +44,7 @@ local no_output_cmds = {
     '^function',
     '^MC$', '^MS$', '^M%+$', '^M%-$',
     '^save',
+    '^variable',
 }
 -- }}}
 
