@@ -1,3 +1,13 @@
+# NOTE
+
+This branch is not yet ready for use. Before then, I need to finish the following:
+
+- Writing a CMake package for `libqalculate` so that users don't have to have `pkg-config` installed in order to build the plugin
+- Fix `:QalcYank`
+- Fix significant bug: After typing in a variable assignment, the variable remains even after the line has been deleted
+  - Related: Variables are shared between multiple buffers, when they shouldn't be
+- Reimplement the `set` command that alters the `PrintOptions` and `EvaluationOptions` (this is normally implemented by the `qalc` program, but qalc.nvim now uses the library directly, so this functionality needs to be separately addressed)
+
 # qalc.nvim
 
 *inspired by [quickmath.nvim](https://github.com/jbyuki/quickmath.nvim)*
