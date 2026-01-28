@@ -174,7 +174,7 @@ local function prepare_results(results)
             new_results[i] = result
         else
             -- match everything after last equals sign
-            new_results[i] = string.match(result, '[≈=] ([^≈=]*)$')
+            new_results[i] = string.match(result, '[≈=] (.*)$')
         end
     end
 
