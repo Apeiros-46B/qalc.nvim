@@ -8,10 +8,8 @@ extern "C" {
 
 #include <libqalculate/qalculate.h>
 
-#include <algorithm>
 #include <cctype>
 #include <string>
-#include <iostream>
 
 static const char* meta = "libqalcbridge.Calculator";
 

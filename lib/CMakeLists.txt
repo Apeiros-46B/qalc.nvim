@@ -6,6 +6,7 @@ project(qalcbridge
 )
 
 find_package(PkgConfig REQUIRED)
+pkg_check_modules(UV REQUIRED libuv)
 pkg_check_modules(LUA REQUIRED luajit)
 pkg_check_modules(QALC REQUIRED libqalculate>=5.0.0)
 
@@ -18,7 +19,7 @@ target_include_directories(${PROJECT_NAME}
 	PRIVATE ${QALC_INCLUDE_DIRS}
 	PRIVATE ${PROJECT_SOURCE_DIR}/include
 )
-target_link_libraries(${PROJECT_NAME} 
+target_link_libraries(${PROJECT_NAME}
 	${LUA_LIBRARIES}
 	${QALC_LIBRARIES}
 )
