@@ -13,6 +13,7 @@ pkg_check_modules(QALC REQUIRED libqalculate>=5.0.0)
 add_library(${PROJECT_NAME} SHARED
 	src/lib.cpp
 	src/calculator.cpp
+	src/util.cpp
 )
 target_include_directories(${PROJECT_NAME}
 	PRIVATE ${LUA_INCLUDE_DIRS}

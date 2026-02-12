@@ -1,7 +1,6 @@
 { pkgs
 , lib
 , mkShell
-, clangStdenv
 , pkg-config
 , cmake
 , lldb
@@ -11,7 +10,9 @@
 , libqalculate
 }:
 
-(mkShell.override { stdenv = clangStdenv; }) rec {
+let
+  llvm = pkgs.llvmPackages_18;
+in (mkShell.override { stdenv = llvm.stdenv; }) {
 	nativeBuildInputs = [
 		pkg-config
 		cmake
@@ -23,10 +24,9 @@
 		luajit
 		libqalculate
 	];
-	LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
 	shellHook = ''
-		export CPATH="$(${llvmPackages.clang}/bin/clang -print-resource-dir)/include:$CPATH"
+		export CPATH="${llvm.clang.cc}/lib/clang/${llvm.clang.version}/include:$CPATH"
 		export CPLUS_INCLUDE_PATH="$CPATH"
-		PS1="(nix) $PS1"
+		export PS1="(nix) $PS1"
 	'';
 }

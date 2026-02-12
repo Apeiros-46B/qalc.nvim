@@ -13,11 +13,29 @@ extern "C" {
 
 static const char* meta = "libqalcbridge.Calculator";
 
+namespace calc {
+
+Instance::Instance() {
+	this->inst = new Calculator();
+	this->inst->loadGlobalDefinitions();
+}
+
+Instance::~Instance() {
+	this->make_current();
+	delete this->inst;
+	CALCULATOR = nullptr; // prevent dangling ptr
+}
+
+void Instance::make_current() {
+  if (CALCULATOR == this->inst) {
+    CALCULATOR = this->inst;
+	}
+}
+
 // called from lua directly
-int calc::init(lua_State* L) {
+int init(lua_State* L) {
 	// "handle" value (userdata) returned back to Lua.
 	// when this value is no longer reachable, the calculator is freed.
-	// we need to do this instead of implementing a destructor on specific Calculator instances because libqalculate for some reason sets a global CALCULATOR singleton when you instantiate a calculator, and if you try to free more than one instance of a Calculator, it results in a double free somewhere.
 	auto calc_handle = lua_newuserdata(L, 1);
 	luaL_setmetatable(L, meta);
 
@@ -29,7 +47,7 @@ int calc::init(lua_State* L) {
 }
 
 // called from lua directly
-int calc::eval(lua_State* L) {
+int eval(lua_State* L) {
 	const char* input = luaL_checkstring(L, -1);
 
 	lua_createtable(L, 0, 4);
@@ -74,18 +92,18 @@ int calc::eval(lua_State* L) {
 	return 1;
 }
 
-int calc::reset(lua_State* L) {
+int reset(lua_State* L) {
 	CALCULATOR->reset();
 	return 0;
 }
 
-int calc::load_defs(lua_State* L) {
+int load_defs(lua_State* L) {
 	const char* file = luaL_checkstring(L, -1);
 	CALCULATOR->loadDefinitions(file, true, false);
 	return 0;
 }
 
-int calc::save_defs(lua_State* L) {
+int save_defs(lua_State* L) {
 	const char* file = luaL_checkstring(L, -1);
 	CALCULATOR->saveVariables(file, false);
 	CALCULATOR->saveUnits(file, false);
@@ -94,7 +112,7 @@ int calc::save_defs(lua_State* L) {
 }
 
 // called from library
-void calc::init_metatables(lua_State* L) {
+void init_metatables(lua_State* L) {
 	luaL_newmetatable(L, meta);
 
 	// create a destructor for the calculator singleton
@@ -102,4 +120,6 @@ void calc::init_metatables(lua_State* L) {
 	lua_setfield(L, -2, "__gc");
 
 	lua_pop(L, 1);
+}
+
 }
