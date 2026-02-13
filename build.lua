@@ -7,6 +7,7 @@ vim.system({
 vim.system({ 'cmake', '--build', './lib/build' }):wait()
 
 -- not sure which extension is used, so we just make symlinks for all of them
+-- TODO: replace this with `cmake --install`
 local exts = { 'dll', 'dylib', 'so' }
 for _, ext in ipairs(exts) do
 	local src = '../../lib/build/libqalcbridge.' .. ext

@@ -2,34 +2,10 @@
 local lib = require('qalc.lib')
 
 -- the `Calculator` object on C++'s side is deallocated when this is `__gc`ed
+-- TODO: replace this with a table that stores a calc::Instance userdata per buf
 local calc_handle = lib.init()
 
 local buffer_def_files = {}
-
-local function load_defs(bufnr)
-	if buffer_def_files[bufnr] == nil then
-		local file = vim.fn.tempname()
-		buffer_def_files[bufnr] = file
-		io.open(file, 'w'):close() -- create empty file
-	else
-		lib.reset()
-		lib.load_defs(buffer_def_files[bufnr])
-	end
-end
-
-local function save_defs(bufnr)
-	local file = buffer_def_files[bufnr]
-	io.open(file, 'w'):close() -- erase file contents
-	lib.save_defs(file)
-end
-
-local function clear_defs(bufnr)
-	if buffer_def_files[bufnr] ~= nil then
-		os.remove(buffer_def_files[bufnr])
-		buffer_def_files[bufnr] = nil
-	end
-	lib.reset()
-end
 
 local diagnostic_template = {
 	col = 0,
@@ -48,7 +24,8 @@ local function push_diagnostic(l, bufnr, lnum, severity, message)
 	l[#l+1] = new
 end
 
--- TODO: more intelligently recalculate instead of recalclating the entire buffer
+-- TODO: more intelligently recalculate instead of recalculating the entire buffer (build a dep graph with extmarks?)
+-- TODO: also handle the edge case of circular deps, probably need to warn
 local function eval(bufnr, first, last)
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 	local result = {
@@ -83,8 +60,5 @@ end
 
 return {
 	eval          = eval,
-	load_defs     = load_defs,
-	save_defs     = save_defs,
-	clear_defs    = clear_defs,
 	__calc_handle = calc_handle,
 }

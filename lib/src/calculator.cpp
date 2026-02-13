@@ -11,24 +11,22 @@ extern "C" {
 #include <cctype>
 #include <string>
 
-static const char* meta = "libqalcbridge.Calculator";
-
 namespace calc {
 
 Instance::Instance() {
-	this->inst = new Calculator();
-	this->inst->loadGlobalDefinitions();
+	inst = new Calculator();
+	inst->loadGlobalDefinitions();
 }
 
 Instance::~Instance() {
-	this->make_current();
-	delete this->inst;
+	make_current();
+	delete inst;
 	CALCULATOR = nullptr; // prevent dangling ptr
 }
 
 void Instance::make_current() {
-  if (CALCULATOR == this->inst) {
-    CALCULATOR = this->inst;
+  if (CALCULATOR == inst) {
+    CALCULATOR = inst;
 	}
 }
 
@@ -37,7 +35,7 @@ int init(lua_State* L) {
 	// "handle" value (userdata) returned back to Lua.
 	// when this value is no longer reachable, the calculator is freed.
 	auto calc_handle = lua_newuserdata(L, 1);
-	luaL_setmetatable(L, meta);
+	luaL_setmetatable(L, CALC_METATABLE);
 
 	new Calculator();
 	CALCULATOR->loadExchangeRates();
@@ -97,23 +95,9 @@ int reset(lua_State* L) {
 	return 0;
 }
 
-int load_defs(lua_State* L) {
-	const char* file = luaL_checkstring(L, -1);
-	CALCULATOR->loadDefinitions(file, true, false);
-	return 0;
-}
-
-int save_defs(lua_State* L) {
-	const char* file = luaL_checkstring(L, -1);
-	CALCULATOR->saveVariables(file, false);
-	CALCULATOR->saveUnits(file, false);
-	CALCULATOR->saveFunctions(file, false);
-	return 0;
-}
-
 // called from library
 void init_metatables(lua_State* L) {
-	luaL_newmetatable(L, meta);
+	luaL_newmetatable(L, CALC_METATABLE);
 
 	// create a destructor for the calculator singleton
 	lua_pushcfunction(L, [](lua_State* L) { delete CALCULATOR; return 0; });

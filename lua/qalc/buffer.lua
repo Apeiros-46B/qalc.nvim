@@ -28,7 +28,7 @@ local function queue_detach(bufnr)
 	detach_queue[bufnr] = true
 
 	-- TODO: after detaching from a file and reattaching, all /global/ definitions are gone
-	require('qalc.bridge').clear_defs(bufnr)
+	-- require('qalc.bridge').clear_defs(bufnr) -- TODO: we don't use this anymore
 	require('qalc.output').clear(bufnr)
 end
 

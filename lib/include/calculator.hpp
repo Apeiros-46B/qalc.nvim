@@ -1,5 +1,4 @@
-#ifndef CALCULATOR_HPP_
-#define CALCULATOR_HPP_
+#pragma once
 
 extern "C" {
 #include <lua.h>
@@ -8,6 +7,8 @@ extern "C" {
 #include <libqalculate/Calculator.h>
 
 namespace calc {
+
+static const char* CALC_METATABLE = "libqalcbridge.Calculator";
 
 struct Instance {
 	Calculator* inst;
@@ -24,13 +25,10 @@ struct Instance {
 	void make_current();
 };
 
+// TODO: replace with the new async job system
 int init(lua_State* L);
 int eval(lua_State* L);
 int reset(lua_State* L);
-int load_defs(lua_State* L);
-int save_defs(lua_State* L);
 void init_metatables(lua_State* L);
 
 }
-
-#endif
