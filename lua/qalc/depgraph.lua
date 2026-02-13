@@ -1,0 +1,8 @@
+-- TODO: extmark-based dependency graph
+-- needs to expose methods to figure out which extmarks to recalculate
+-- needs to also detect reference cycles and give errors ("reference cycle found, refusing to evaluate")
+--> c = a
+--> b = c
+--> a = b
+-- or even
+--> a = a

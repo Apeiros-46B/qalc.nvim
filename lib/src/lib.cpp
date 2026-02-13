@@ -1,28 +1,23 @@
-#include "calculator.hpp"
-#include "worker.hpp"
-
 extern "C" {
 #include <lua.h>
-#include <lualib.h>
 #include <lauxlib.h>
 }
 
+#include "calculator.hpp"
+#include "worker.hpp"
+
 static const luaL_Reg functions[] = {
-	{ "init",      calc::init      },
-	{ "eval",      calc::eval      },
-	{ "reset",     calc::reset     },
-	{ nullptr,     nullptr         }
+	{ "submit_job",    worker::lua_submit_job   },
+	{ "set_callback",  worker::lua_set_callback },
+	{ "make_instance", calc::lua_make_instance  },
+	{ nullptr,         nullptr                  },
 };
 
 // in lua code, it is required as "qalc.lib" so this is named luaopen_qalc_lib
 extern "C" int luaopen_qalc_lib(lua_State* L) {
-	calc::init_metatables(L);
-	auto* worker = new worker::Worker();
-	worker->init(L);
-	// TODO: replace with new API
-	// - init: initializes the Worker and returns the userdata with __gc hook, attaches the callback, etc
-	// - get_calculator: returns a Calculator userdata
-	// - eval: takes a Calculator and submits a given job, invoking the previously registered callback when done
+	calc::init_mt(L);
+	worker::init_mt(L);
+	worker::init(L);
 	luaL_newlib(L, functions);
 	return 1;
 }

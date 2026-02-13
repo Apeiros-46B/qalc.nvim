@@ -1,7 +1,8 @@
 -- handle buffer creation, attach/detach, and yanking result
+-- TODO: probably need to rework this entirely for the new async architecture
 local cfg = require('qalc.config').cfg
 
-local attached = {}
+local attached_instances = {}
 -- mapping of bufnr -> bool, all buffers in this set should be detached from
 local detach_queue = {}
 local results = {}
@@ -27,15 +28,15 @@ local function queue_detach(bufnr)
 	-- referenced in nvim_buf_attach callback to actually detach the callback
 	detach_queue[bufnr] = true
 
-	-- TODO: after detaching from a file and reattaching, all /global/ definitions are gone
-	-- require('qalc.bridge').clear_defs(bufnr) -- TODO: we don't use this anymore
 	require('qalc.output').clear(bufnr)
 end
 
 local function detach(bufnr)
 	detach_queue[bufnr] = nil
 	results[bufnr] = nil
-	attached[bufnr] = false
+
+	-- dropping the ref is enough to gc it eventually
+	attached_instances[bufnr] = nil
 end
 -- }}}
 
@@ -44,7 +45,7 @@ local function attach(bufnr)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 
 	-- don't attach twice
-	if attached[bufnr] then
+	if attached_instances[bufnr] ~= nil then
 		return true
 	end
 
@@ -52,6 +53,7 @@ local function attach(bufnr)
 	detach_queue[bufnr] = nil
 	vim.fn.bufload(bufnr)
 
+	local inst = require('qalc.lib').make_instance()
 	local function cb(_, _, _, first, last)
 		if detach_queue[bufnr] then
 			detach(bufnr)
@@ -59,20 +61,21 @@ local function attach(bufnr)
 		end
 
 		first = first or 0
-		local result = require('qalc.bridge').eval(bufnr, first, last)
-		require('qalc.output').render(bufnr, result, first)
+		-- TODO:
+		-- local result = require('qalc.bridge').eval(bufnr, first, last)
+		-- require('qalc.output').render(bufnr, result, first)
 		results[bufnr] = result
 	end
 
 	cb() -- update once now
 	vim.api.nvim_buf_attach(0, false, { on_lines = cb })
-	attached[bufnr] = true
+	attached_instances[bufnr] = inst
 
 	vim.bo.filetype = 'qalc'
 end
 
 local function is_attached(bufnr)
-	return attached[bufnr]
+	return attached_instances[bufnr]
 end
 -- }}}
 

@@ -28,6 +28,9 @@ local function render(bufnr, result, first)
 	vim.diagnostic.set(ns, bufnr, result.diagnostics)
 end
 
+-- TODO: we need to expose a callback to set outputs, and then use
+-- lib.set_callback on it somewhere (probably in init.lua?)
+
 return {
 	clear  = clear,
 	render = render,
