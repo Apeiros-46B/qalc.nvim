@@ -53,7 +53,24 @@ void init(lua_State* L) {
 	worker = *ptr;
 }
 
-// submits a job to the worker thread. it should have been intiialized
+// get a reference to nvim's loop. we need to do this since uv_default_loop() does NOT
+// return the same loop as the one that nvim uses. we pass a uv handle from lua, and then
+// extract the inner loop reference
+// MUST be done from lua side before submitting any jobs:
+//   local dummy = vim.uv.new_timer()
+//   lib.init_loop(dummy)
+//   dummy:close()
+int lua_init_loop(lua_State* L) {
+	uv_handle_t** ptr = lua::Userdata<uv_handle_t*>::check(L, 1, "uv_timer");
+
+	if (worker != nullptr && ptr != nullptr && *ptr != nullptr) {
+		uv_loop_t* nvim_loop = (*ptr)->loop;
+		worker->init_async(nvim_loop);
+	}
+	return 0;
+}
+
+// submits a job to the worker thread. it should have been intialized already
 // lib.submit_job(type, bufnr, extmark_id, payload)
 int lua_submit_job(lua_State* L) {
 	JobType type = static_cast<JobType>(lua::pop<int>(L, 1));
@@ -95,9 +112,11 @@ Worker::Worker(lua_State* L): L{L} {
 	calc->loadExchangeRates();
 	calc->loadGlobalDefinitions();
 
-	uv_loop_t* loop = uv_default_loop();
-	uv_async_init(loop, &async_handle, callback);
-	async_handle.data = this;
+	// async remains uninitialized!
+	// these must be called before submitting any jobs:
+	// - init_async
+	// - set_callback
+
 	running = true;
 	worker_thread = std::thread(&Worker::main_loop, this);
 }
@@ -127,11 +146,23 @@ Worker::~Worker() {
 	if (worker_thread.joinable()) {
 		worker_thread.join();
 	}
-	uv_close((uv_handle_t*)&async_handle, nullptr);
+	if (async_handle != nullptr) {
+		// do not free until the close callback is called
+		uv_close(reinterpret_cast<uv_handle_t*>(async_handle), [](uv_handle_t* h) {
+			delete reinterpret_cast<uv_async_t*>(h);
+		});
+	}
 
 	CALCULATOR = calc;
 	delete calc;
 	CALCULATOR = nullptr;
+}
+
+// main thread
+void Worker::init_async(uv_loop_t* loop) {
+	async_handle = new uv_async_t();
+	uv_async_init(loop, async_handle, Worker::callback);
+	async_handle->data = this;
 }
 
 // main thread
@@ -275,13 +306,12 @@ void Worker::main_loop() {
 			result.diagnostics.push_back(diag);
 		}
 
+		// push results and notify main thread
 		{
 			std::lock_guard<std::mutex> lock(queue_mutex);
 			output.push(std::move(result));
 		}
-
-		// notify main thread
-		uv_async_send(&async_handle);
+		uv_async_send(async_handle);
 	}
 }
 

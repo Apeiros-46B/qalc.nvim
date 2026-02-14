@@ -22,6 +22,7 @@ void init_mt(lua_State* L);
 void init(lua_State* L);
 
 // called from lua
+int lua_init_loop(lua_State* L);
 int lua_submit_job(lua_State* L);
 int lua_set_callback(lua_State* L);
 
@@ -87,13 +88,14 @@ public:
 	Worker(lua_State* L);
 	~Worker();
 
+	void init_async(uv_loop_t* loop);
 	void set_callback(int ref);
 	void submit_job(Job&& job);
 
 private:
 	lua_State* L = nullptr;
 	int callback_ref = LUA_NOREF;
-	uv_async_t async_handle;
+	uv_async_t* async_handle;
 
 	std::thread worker_thread;
 	std::atomic<bool> running{false};
