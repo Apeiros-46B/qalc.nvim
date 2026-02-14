@@ -2,17 +2,18 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <libqalculate/includes.h>
 #include <mutex>
 #include <queue>
+#include <string>
 #include <thread>
 #include <vector>
 
 extern "C" {
 #include <lauxlib.h>
 }
+#include <libqalculate/Calculator.h>
 #include <uv.h>
-
-#include "calculator.hpp"
 
 namespace worker {
 
@@ -32,6 +33,14 @@ enum class Severity: int {
 	HINT = 4,
 };
 
+// matches enum in lua bridge
+enum class JobType: int {
+	DELETE_SYM = 1,
+	CLEAR_SYMS = 2,
+	PARSE_LINE = 3,
+	EVAL_LINE = 4,
+};
+
 struct Diagnostic {
 	Severity severity;
 	std::string msg;
@@ -39,20 +48,37 @@ struct Diagnostic {
 
 // TODO: take in print options
 struct Job {
-	calc::Instance* inst;
-	std::string expr;
+	JobType type;
 	int bufnr;
 	int extmark_id;
-	int inst_ud_ref; // lua registry ref to userdata (prevent gc)
+
+	// when type is DELETE_SYM: payload = the symbol to delete
+	// when type is CLEAR_SYMS: payload = undefined
+	// when type is PARSE_LINE: payload = the line to parse
+	// when type is EVAL_LINE: payload = the line to eval
+	std::string payload;
+
+	ParseOptions get_parse_options();
+	PrintOptions get_print_options();
+	EvaluationOptions get_eval_options();
 };
 
 // TODO: add diagnostics
 struct JobResult {
-	std::string output;
+	// can never be DELETE_SYM or CLEAR_SYMS, they return no results
+	JobType type;
 	int bufnr;
 	int extmark_id;
-	int inst_ud_ref;
+
+	// only defined when type is EVAL_LINE, in which case it is the calculation result
+	std::string output;
+
+	// empty unless type is PARSE_LINE, EVAL_LINE
 	std::vector<Diagnostic> diagnostics;
+
+	// empty unless type is PARSE_LINE
+	std::vector<std::string> out_syms;
+	std::vector<std::string> in_syms;
 };
 
 class Worker {
@@ -76,6 +102,9 @@ private:
 	std::queue<JobResult> output;
 	std::mutex queue_mutex;
 	std::condition_variable cv;
+
+	// this is the only calculator instance we can use
+	Calculator* calc = nullptr;
 
 	void main_loop();
 	void process_results();

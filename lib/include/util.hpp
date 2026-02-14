@@ -69,21 +69,53 @@ inline void push_and_seti(lua_State* L, T v, int i) {
 	lua_rawseti(L, -2, i);
 }
 
+template<typename T, typename Collection>
+inline void make_array(lua_State* L, Collection& iter) {
+	lua_createtable(L, static_cast<int>(iter.size()), 0);
+	int i = 1;
+	for (T& v : iter) {
+		lua::push_and_seti(L, v, i++);
+	}
+}
+
+// the callable should push one item when called with (lua_State* L, T value)
+template<typename T, typename Collection, typename Callable>
+inline void make_array(
+	lua_State* L,
+	Collection& iter,
+	Callable fn
+) {
+	lua_createtable(L, static_cast<int>(iter.size()), 0);
+	int i = 1;
+	for (T& v : iter) {
+		fn(L, v);
+		lua_rawseti(L, -2, i++);
+	}
+}
+
 template<typename T, typename U, typename... Args>
 void push(lua_State* L, T&& first, U&& second, Args&&... args) {
 	push(L, std::forward<T>(first));
 	push(L, std::forward<U>(second), std::forward<Args>(args)...);
 }
 
-template<typename T> T check(lua_State* L, int index);
+template<typename T> T pop(lua_State* L, int index);
 
-template<> inline int check<int>(lua_State* L, int index) {
+template<> inline int pop<int>(lua_State* L, int index) {
 	return (int)luaL_checkinteger(L, index);
 }
-template<> inline std::string check<std::string>(lua_State* L, int index) {
+template<> inline std::string pop<std::string>(lua_State* L, int index) {
 	size_t len;
 	const char* s = luaL_checklstring(L, index, &len);
 	return std::string(s, len);
+}
+
+template<typename T> T pop_or(lua_State* L, int index, T default_val) {
+	if (lua_isnoneornil(L, index)) {
+		return default_val;
+	} else {
+		return pop<T>(L, index);
+	}
 }
 
 }
