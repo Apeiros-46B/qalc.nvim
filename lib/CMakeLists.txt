@@ -11,9 +11,10 @@ pkg_check_modules(LUA REQUIRED luajit)
 pkg_check_modules(QALC REQUIRED libqalculate>=5.0.0)
 
 add_library(${PROJECT_NAME} SHARED
-	src/lib.cpp
 	src/calculator.cpp
+	src/lib.cpp
 	src/util.cpp
+	src/worker.cpp
 )
 target_include_directories(${PROJECT_NAME}
 	PRIVATE ${LUA_INCLUDE_DIRS}

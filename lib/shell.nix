@@ -1,10 +1,8 @@
 { pkgs
-, lib
 , mkShell
 , pkg-config
 , cmake
 , lldb
-, llvmPackages
 , libuv
 , luajit
 , libqalculate
@@ -17,7 +15,7 @@ in (mkShell.override { stdenv = llvm.stdenv; }) {
 		pkg-config
 		cmake
 		lldb
-		llvmPackages.clang-tools
+		llvm.clang-tools
 	];
 	buildInputs = [
 		libuv

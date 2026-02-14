@@ -14,10 +14,8 @@ StackGuard::StackGuard(lua_State* L, int ret_count = 0):
 StackGuard::~StackGuard() {
 	int current_top = lua_gettop(L);
 	int expected = top + return_count;
-	if (current_top != expected) {
-		if (current_top > expected) {
-			lua_pop(L, current_top - expected);
-		}
+	if (current_top > expected) {
+		lua_pop(L, current_top - expected);
 	}
 }
 

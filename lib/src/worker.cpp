@@ -1,20 +1,22 @@
 #include <atomic>
 #include <condition_variable>
+#include <libqalculate/includes.h>
 #include <mutex>
 #include <queue>
 #include <thread>
+#include <vector>
 
 extern "C" {
 #include <lua.h>
 #include <lauxlib.h>
 }
+#include <libqalculate/Calculator.h>
 #include <uv.h>
 
 #include "calculator.hpp"
 #include "util.hpp"
 #include "worker.hpp"
 
-// TODO: verify and test
 namespace worker {
 
 static Worker* worker = nullptr;
@@ -27,6 +29,9 @@ void init_mt(lua_State* L) {
 		Worker** w_ptr = lua::Userdata<Worker*>::check(L, 1, MT);
 		if (*w_ptr) {
 			delete *w_ptr;
+			if (worker == *w_ptr) {
+				worker = nullptr;
+			}
 			*w_ptr = nullptr;
 		}
 		// we don't try to delete the w_ptr itself. it is memory allocated by lua, not us
@@ -55,8 +60,8 @@ int lua_submit_job(lua_State* L) {
 		calc::MT
 	);
 	std::string expr = lua::check<std::string>(L, 2);
-	int bufnr = lua_tointeger(L, 3);
-	int extmark_id = lua_tointeger(L, 4);
+	int bufnr = lua::check<int>(L, 3);
+	int extmark_id = lua::check<int>(L, 4);
 
 	// IMPORTANT[1]: reference the instance userdata in the registry so if the user
 	// closes the buffer right after submitting a job, there is no risk of
@@ -72,6 +77,7 @@ int lua_submit_job(lua_State* L) {
 	return 0;
 }
 
+// lib.set_callback(function(bufnr, extmark_id, output, diagnostics) ... end)
 int lua_set_callback(lua_State* L) {
 	if (!lua_isfunction(L, 1)) {
 		luaL_error(L, "expected function as arg 1");
@@ -123,6 +129,39 @@ void Worker::submit_job(Job&& job) {
 }
 
 // worker thread
+static std::string eval(Job& job, std::vector<Diagnostic>& diagnostics) {
+	// this is safe because we are the only thread processing jobs
+	job.inst->make_current();
+	auto calc = job.inst->inner;
+
+	// TODO: need to pass eval options and print options to here
+	std::string result = calc->calculateAndPrint(job.expr, 2000);
+
+	CalculatorMessage* msg;
+	while ((msg = calc->message()) != nullptr) {
+		Diagnostic diag;
+
+		diag.msg = msg->c_message();
+		switch (msg->type()) {
+			case MESSAGE_INFORMATION:
+				diag.severity = Severity::INFO;
+				break;
+			case MESSAGE_WARNING:
+				diag.severity = Severity::WARN;
+				break;
+			case MESSAGE_ERROR:
+				diag.severity = Severity::ERROR;
+				break;
+		}
+
+		diagnostics.push_back(diag);
+		calc->nextMessage();
+	}
+
+	return result;
+}
+
+// worker thread
 void Worker::main_loop() {
 	while (true) {
 		Job job;
@@ -143,17 +182,16 @@ void Worker::main_loop() {
 		result.inst_ud_ref = job.inst_ud_ref;
 
 		try {
-			// this is safe because we are the only thread processing jobs
-			job.inst->make_current();
-
-			// TODO: actually use the calculator
-			// job.inst->eval(job.expression)...
-
-			result.success = true;
-			result.output = "Calculated: " + job.expr;
+			result.output = eval(job, result.diagnostics);
 		} catch (const std::exception& e) {
-			result.success = false;
-			result.output = e.what();
+			result.output = "";
+			result.diagnostics.clear();
+
+			Diagnostic diag;
+			diag.severity = Severity::ERROR;
+			diag.msg = e.what();
+
+			result.diagnostics.push_back(diag);
 		}
 
 		{
@@ -172,6 +210,25 @@ void Worker::callback(uv_async_t* handle) {
 	self->process_results();
 }
 
+// push 1 (table)
+static void build_diagnostics_table(
+	lua_State* L,
+	std::vector<Diagnostic>& diagnostics
+) {
+	lua::StackGuard guard(L, 1);
+
+	lua_createtable(L, static_cast<int>(diagnostics.size()), 0);
+
+	int i = 1;
+	for (Diagnostic& diag : diagnostics) {
+		lua_createtable(L, 0, 2);
+		lua::push_and_set(L, diag.msg, "message");
+		lua::push_and_set(L, static_cast<int>(diag.severity), "severity");
+
+		lua_rawseti(L, -2, i++);
+	}
+}
+
 // main thread (libuv event loop)
 void Worker::process_results() {
 	std::queue<JobResult> ready_results;
@@ -184,15 +241,22 @@ void Worker::process_results() {
 		JobResult res = ready_results.front();
 		ready_results.pop();
 
-		// at the end of the scope, don't let the stack grow past what it is now
+		// at the end of the scope, shrink the stack back to where it is now
 		lua::StackGuard guard(L, 0);
 
 		if (callback_ref != LUA_NOREF) {
 			// push the callback onto the stack
 			lua_rawgeti(L, LUA_REGISTRYINDEX, callback_ref);
 
-			// TODO: unwrap JobResult onto the stack and build the diagnostics table,
-			// then call the callback with those values
+			lua::push(L, res.bufnr);
+			lua::push(L, res.extmark_id);
+			lua::push(L, res.output);
+			build_diagnostics_table(L, res.diagnostics);
+
+			if (lua_pcall(L, 4, 0, 0) != LUA_OK) {
+				fprintf(stderr, "qalc error: %s\n", lua_tostring(L, -1));
+				lua_pop(L, 1);
+			}
 		}
 
 		// IMPORTANT[2]: unref the instance, so the calculator can be gc'ed if it is no

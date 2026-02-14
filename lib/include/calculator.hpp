@@ -3,7 +3,6 @@
 extern "C" {
 #include <lua.h>
 }
-
 #include <libqalculate/Calculator.h>
 
 namespace calc {

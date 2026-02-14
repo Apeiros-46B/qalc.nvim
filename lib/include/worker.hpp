@@ -5,6 +5,7 @@
 #include <mutex>
 #include <queue>
 #include <thread>
+#include <vector>
 
 extern "C" {
 #include <lauxlib.h>
@@ -23,6 +24,7 @@ void init(lua_State* L);
 int lua_submit_job(lua_State* L);
 int lua_set_callback(lua_State* L);
 
+// matches vim.diagnostic.severity (can verify with vim.inspect())
 enum class Severity: int {
 	ERROR = 1,
 	WARN = 2,
@@ -32,8 +34,6 @@ enum class Severity: int {
 
 struct Diagnostic {
 	Severity severity;
-	int col; // 0-indexed (-1 if unknown)
-	int end_col;
 	std::string msg;
 };
 
@@ -52,7 +52,7 @@ struct JobResult {
 	int bufnr;
 	int extmark_id;
 	int inst_ud_ref;
-	bool success;
+	std::vector<Diagnostic> diagnostics;
 };
 
 class Worker {

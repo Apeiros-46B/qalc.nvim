@@ -57,10 +57,22 @@ inline void push(lua_State* L, const char* v) {
 	lua_pushstring(L, v);
 }
 
-template<typename T, typename... Args>
-void push(lua_State* L, T&& first, Args&&... args) {
+template<typename T>
+inline void push_and_set(lua_State* L, T v, const char* k) {
+	lua::push(L, v);
+	lua_setfield(L, -2, k);
+}
+
+template<typename T>
+inline void push_and_seti(lua_State* L, T v, int i) {
+	lua::push(L, v);
+	lua_rawseti(L, -2, i);
+}
+
+template<typename T, typename U, typename... Args>
+void push(lua_State* L, T&& first, U&& second, Args&&... args) {
 	push(L, std::forward<T>(first));
-	push(L, std::forward<Args>(args)...);
+	push(L, std::forward<U>(second), std::forward<Args>(args)...);
 }
 
 template<typename T> T check(lua_State* L, int index);
