@@ -15,17 +15,36 @@ vim.api.nvim_create_user_command('QalcAttach',
 	{ nargs = 0 }
 )
 
-vim.api.nvim_create_user_command('QalcYank',
-	function(cmd)
-		require('qalc.buffer').yank(
-			cmd.args or require('qalc.config').cfg.yank_default_register or ''
-		)
-	end,
-	{ nargs = '?' }
-)
+-- vim.api.nvim_create_user_command('QalcYank',
+-- 	function(cmd)
+-- 		require('qalc.buffer').yank(
+-- 			cmd.args or require('qalc.config').cfg.yank_default_register or ''
+-- 		)
+-- 	end,
+-- 	{ nargs = '?' }
+-- )
 -- }}}
 
-vim.api.nvim_create_autocmd({ 'BufEnter' }, {
+local augroup = vim.api.nvim_create_augroup("QalcBufferManagement", { clear = true })
+
+vim.api.nvim_create_autocmd({ 'BufReadPost', 'BufNewFile' }, {
+	group = augroup,
 	pattern = { '*.qalc' },
-	command = 'QalcAttach',
+	callback = function(args)
+		require('qalc.buffer').attach(args.buf)
+	end,
+})
+
+-- sync state whenever focusing a buffer
+vim.api.nvim_create_autocmd('BufEnter', {
+	group = augroup,
+	pattern = '*',
+	callback = function(args)
+		local buffer = require('qalc.buffer')
+		vim.schedule(function()
+			if buffer.is_attached(args.buf) then
+				buffer.focus_buffer(args.buf)
+			end
+		end)
+	end
 })

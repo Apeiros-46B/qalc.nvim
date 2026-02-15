@@ -1,8 +1,10 @@
 -- handle qalc.nvim configuration
-local ns = vim.api.nvim_create_namespace('qalc')
+local ns_ui = vim.api.nvim_create_namespace('qalc_ui')
 
--- {{{ default configuration
-local cfg = {
+local M = {}
+
+-- default configuration
+M.cfg = {
 	-- default name of a newly opened buffer
 	bufname = '', -- string
 
@@ -44,9 +46,7 @@ local cfg = {
 		},
 	},
 }
--- }}}
 
--- {{{ setup with user overrides
 local function deep_extend_inplace(dest, src)
 	for k, v in pairs(src) do
 		if type(v) ~= 'table' then
@@ -57,15 +57,11 @@ local function deep_extend_inplace(dest, src)
 	end
 end
 
-local function setup(new_cfg)
-	deep_extend_inplace(cfg, new_cfg)
-	if cfg.diagnostics ~= false then
-		vim.diagnostic.config(cfg.diagnostics, ns)
+function M.setup(new_cfg)
+	deep_extend_inplace(M.cfg, new_cfg)
+	if M.cfg.diagnostics ~= false then
+		vim.diagnostic.config(M.cfg.diagnostics, ns_ui)
 	end
 end
--- }}}
 
-return {
-	cfg   = cfg,
-	setup = setup,
-}
+return M

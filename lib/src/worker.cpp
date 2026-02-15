@@ -350,6 +350,7 @@ void Worker::process_results() {
 				const Diagnostic& diag
 			) {
 				lua_createtable(L, 0, 2);
+				// must match nvim diagnostic api keys exactly
 				lua::push_and_set(L, diag.msg, "message");
 				lua::push_and_set(L, static_cast<int>(diag.severity), "severity");
 			});
