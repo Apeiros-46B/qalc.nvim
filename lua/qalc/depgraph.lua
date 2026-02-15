@@ -27,7 +27,7 @@ function M:get_cascade(start_extmark_id)
 	-- marks are returned in top->down order
 	local marks = vim.api.nvim_buf_get_extmarks(self.bufnr, ns_track, 0, -1, {})
 	local cascade = {}
-	local seen_rows = {}
+	local seen_lines = {}
 	local total_lines = vim.api.nvim_buf_line_count(self.bufnr)
 
 	for _, mark in ipairs(marks) do
@@ -35,8 +35,8 @@ function M:get_cascade(start_extmark_id)
 		local row = mark[2]
 
 		-- only evaluate the first anchor we find on each row
-		if row < total_lines and not seen_rows[row] then
-			seen_rows[row] = true
+		if row < total_lines and not seen_lines[row] then
+			seen_lines[row] = true
 			table.insert(cascade, id)
 		end
 	end

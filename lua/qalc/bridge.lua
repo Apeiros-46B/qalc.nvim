@@ -17,7 +17,9 @@ end
 
 function M.register_callback(attached_bufs)
 	local function handle_job(type, bufnr, extmark, output, diags, out_syms, in_syms)
-		if type == M.JobType.PARSE_LINE then
+		if type == M.JobType.EVAL_LINE then
+			require('qalc.output').render(bufnr, extmark, output, diags)
+		elseif type == M.JobType.PARSE_LINE then
 			local graph = attached_bufs[bufnr]
 			if not graph then return end
 
@@ -38,17 +40,27 @@ function M.register_callback(attached_bufs)
 				else
 					local pos = vim.api.nvim_buf_get_extmark_by_id(bufnr, ns_track, id, {})
 					if #pos > 0 then
-						local row = pos[1]
-						local lines = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)
-						local text = lines[1] or ""
-						if text:match("%S") then
-							M.submit(M.JobType.EVAL_LINE, bufnr, id, text)
+						local lnum = pos[1]
+						local total_lines = vim.api.nvim_buf_line_count(bufnr)
+
+						-- ensure the line actually exists in the buffer (dont try to read past end)
+						if lnum < total_lines then
+							-- find the active mark (first one) on this line
+							local active_mark = vim.api.nvim_buf_get_extmarks(
+								bufnr, ns_track, {lnum, 0}, {lnum, -1}, { limit = 1 }
+							)
+
+							-- only evaluate once for the active mark
+							if #active_mark > 0 and active_mark[1][1] == id then
+								local text = vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or ""
+								if text:match("%S") then
+									M.submit(M.JobType.EVAL_LINE, bufnr, id, text)
+								end
+							end
 						end
 					end
 				end
 			end
-		elseif type == M.JobType.EVAL_LINE then
-			require('qalc.output').render(bufnr, extmark, output, diags)
 		end
 	end
 

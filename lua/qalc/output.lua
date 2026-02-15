@@ -1,4 +1,6 @@
 -- display Qalculate output to the user through virtual text and diagnostics
+-- we distinguish between "tracking marks" and "UI marks" because tracking marks must be
+-- persistent while UI marks may be randomly destroyed and re-created (for fancy effects)
 local ns_track = vim.api.nvim_create_namespace('qalc_track')
 local ns_ui = vim.api.nvim_create_namespace('qalc_ui')
 local cfg = require('qalc.config').cfg
@@ -36,6 +38,9 @@ local function flush_diags(bufnr)
 end
 
 -- clear one extmark
+-- TODO: at all call sites, instead of clearing eagerly when job is submitted, clear
+-- right before the new result comes in. this way we avoid a blank flicker (because of the
+-- absence of the stale value) and instead use the flash to show when the new value arrives
 function M.clear(bufnr, tracking_mark)
 	local pos = vim.api.nvim_buf_get_extmark_by_id(bufnr, ns_track, tracking_mark, {})
 	if pos == nil or #pos == 0 then return end
@@ -77,7 +82,7 @@ function M.render(bufnr, tracking_mark, output, diags)
 			virt_text_pos = 'eol',
 			hl_mode = 'combine',
 
-			-- do not track ephemeral UI marks for undo/redo
+			-- do not track ephemeral UI marks in undo/redo
 			invalidate = true,
 			undo_restore = false,
 		})

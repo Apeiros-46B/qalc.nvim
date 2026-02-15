@@ -55,8 +55,6 @@ function M.attach(bufnr)
 	detach_queue[bufnr] = nil
 	vim.fn.bufload(bufnr)
 
-	-- TODO: the extmark handling in this is severely broken in some undo/redo edge cases
-	-- it can leave lines without extmarks, or pile multiple extmarks on one line
 	local function cb(_, _, _, first, last, new_last)
 		if detach_queue[bufnr] then
 			detach(bufnr)
@@ -65,11 +63,16 @@ function M.attach(bufnr)
 
 		local total_lines = vim.api.nvim_buf_line_count(bufnr)
 
-		-- clear extmarks that are outside of the buffer
-		local eof_marks = vim.api.nvim_buf_get_extmarks(bufnr, ns_track, {total_lines, 0}, {-1, -1}, {})
+		-- extmarks pushed beyond the last physical line should be treated as ghosts
+		local eof_marks = vim.api.nvim_buf_get_extmarks(
+			bufnr, ns_track,
+			{total_lines, 0}, {-1, -1},
+			{}
+		)
 		for _, mark in ipairs(eof_marks) do
-			vim.api.nvim_buf_del_extmark(bufnr, ns_track, mark[1])
-			require('qalc.output').clear(bufnr, mark[1])
+			local id = mark[1]
+			bridge.submit(bridge.JobType.PARSE_LINE, bufnr, id, "")
+			require('qalc.output').clear(bufnr, id)
 		end
 
 		-- determine which lines have been modified
@@ -79,56 +82,42 @@ function M.attach(bufnr)
 		-- process extmarks on every modified line
 		local lines = vim.api.nvim_buf_get_lines(bufnr, mod_start, mod_end, false)
 		for i, text in ipairs(lines) do
-			local row = mod_start + i - 1
-			local row_marks = vim.api.nvim_buf_get_extmarks(
-				bufnr, ns_track,
-				{row, 0}, {row, -1},
-				{}
+			local lnum = mod_start + i - 1
+			local marks = vim.api.nvim_buf_get_extmarks(
+				bufnr, ns_track, {lnum, 0}, {lnum, -1}, {}
 			)
 
-			local active_extmark_id
-			if #row_marks > 0 then -- a mark exists already
-				-- always use the first tracking mark
-				active_extmark_id = row_marks[1][1]
-
-				-- garbage collect duplicate extmarks
-				if #row_marks > 1 then
-					for j = 2, #row_marks do
-						local ghost_id = row_marks[j][1]
-						vim.api.nvim_buf_del_extmark(bufnr, ns_track, ghost_id)
-					end
-				end
+			if #marks == 0 then -- no extmarks exist on this line yet
+				-- make a new mark
+				local new_id = vim.api.nvim_buf_set_extmark(bufnr, ns_track, lnum, 0, {
+					right_gravity = false -- keep at column 0 instead of drifting rightwards
+				})
 
 				if text:match("%S") then
-					bridge.submit(bridge.JobType.PARSE_LINE, bufnr, active_extmark_id, text)
-				else
-					-- send empty parse job so dep graph is updated with symbol deletes
-					bridge.submit(bridge.JobType.PARSE_LINE, bufnr, active_extmark_id, "")
-					require('qalc.output').clear(bufnr, active_extmark_id)
+					bridge.submit(bridge.JobType.PARSE_LINE, bufnr, new_id, text)
 				end
-			else -- there is no existing mark
-				-- we need vim.schedule so the extmarks are applied after any pending undo/redo or
-				-- other editing transaction, which prevents strange issues
-				vim.schedule(function()
-					if not vim.api.nvim_buf_is_valid(bufnr) then return end
-					if row >= vim.api.nvim_buf_line_count(bufnr) then return end
+			else -- marks exist on this line
+				-- first mark is the active one
+				local active_id = marks[1][1]
 
-					-- line without extmark, make a new one asap
-					-- we need right_gravity to prevent extmarks from being pushed outside of
-					-- the buffer in some cases
-					active_extmark_id = vim.api.nvim_buf_set_extmark(bufnr, ns_track, row, 0, {
-						right_gravity = false
-					})
+				if text:match("%S") then
+					bridge.submit(bridge.JobType.PARSE_LINE, bufnr, active_id, text)
+				else
+					-- blank line MUST be routed through callback to trigger cascade update
+					-- it seems inefficient, but it's the only way we can get the depgraph
+					-- to update correctly
+					bridge.submit(bridge.JobType.PARSE_LINE, bufnr, active_id, "")
+					require('qalc.output').clear(bufnr, active_id)
+				end
 
-					local current_text = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ""
-
-					if current_text:match("%S") then
-						bridge.submit(bridge.JobType.PARSE_LINE, bufnr, active_extmark_id, current_text)
-					else
-						bridge.submit(bridge.JobType.PARSE_LINE, bufnr, active_extmark_id, "")
-						require('qalc.output').clear(bufnr, active_extmark_id)
+				-- ghost marks must also be routed through callback to prune from depgraph
+				if #marks > 1 then
+					for j = 2, #marks do
+						local ghost_id = marks[j][1]
+						bridge.submit(bridge.JobType.PARSE_LINE, bufnr, ghost_id, "")
+						require('qalc.output').clear(bufnr, ghost_id)
 					end
-				end)
+				end
 			end
 		end
 	end
@@ -158,16 +147,29 @@ function M.focus_buffer(bufnr)
 	-- wipe local variables from other buffers
 	bridge.submit(bridge.JobType.CLEAR_SYMS, bufnr, -1, "")
 
-	-- evaluate all lines in top to bottom order
+	-- fetch all marks in top-down order (this includes ghosts)
 	local marks = vim.api.nvim_buf_get_extmarks(bufnr, ns_track, 0, -1, {})
+	local seen_lines = {}
+
+	-- evaluate all lines in order
 	for _, mark in ipairs(marks) do
 		local extmark_id = mark[1]
 		local lnum = mark[2]
-		local lines = vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)
-		local text = lines[1] or ""
-		if text:match("%S") then
-			-- direct eval, don't go through the depgraph
-			bridge.submit(bridge.JobType.EVAL_LINE, bufnr, extmark_id, text)
+
+		-- if we haven't seen this row yet, this is the active mark and not a ghost. otherwise,
+		-- it's a ghost and we just ignore it to prevent duplicate eval calls on the same line
+		if not seen_lines[lnum] then
+			seen_lines[lnum] = true
+
+			local lines = vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)
+			local text = lines[1] or ""
+
+			if text:match("%S") then
+				-- direct eval, don't go through the depgraph
+				-- the depgraph state is already maintained properly, the only reason we need to do
+				-- this is to "synchronize" the libqalculate Calculator state with the new buffer
+				bridge.submit(bridge.JobType.EVAL_LINE, bufnr, extmark_id, text)
+			end
 		end
 	end
 end
