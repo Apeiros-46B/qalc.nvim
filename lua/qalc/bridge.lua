@@ -17,6 +17,9 @@ end
 
 function M.register_callback(attached_bufs)
 	local function handle_job(type, bufnr, extmark, output, diags, out_syms, in_syms)
+		-- buffer might have been closed while C++ was working
+		if not vim.api.nvim_buf_is_valid(bufnr) then return end
+
 		if type == M.JobType.EVAL_LINE then
 			require('qalc.output').render(bufnr, extmark, output, diags)
 		elseif type == M.JobType.PARSE_LINE then
@@ -34,6 +37,7 @@ function M.register_callback(attached_bufs)
 			-- for now, we need it to properly clear removed variables
 			M.submit(M.JobType.CLEAR_SYMS, bufnr, -1, "")
 
+			local total_lines = vim.api.nvim_buf_line_count(bufnr)
 			for _, id in ipairs(cascade) do
 				if depgraph_diags and depgraph_diags[id] then
 					require('qalc.output').render(bufnr, id, "", depgraph_diags[id])
@@ -41,7 +45,6 @@ function M.register_callback(attached_bufs)
 					local pos = vim.api.nvim_buf_get_extmark_by_id(bufnr, ns_track, id, {})
 					if #pos > 0 then
 						local lnum = pos[1]
-						local total_lines = vim.api.nvim_buf_line_count(bufnr)
 
 						-- ensure the line actually exists in the buffer (dont try to read past end)
 						if lnum < total_lines then
