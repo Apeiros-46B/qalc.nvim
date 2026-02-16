@@ -270,7 +270,7 @@ std::string dump_ast(const MathStructure& ast) {
 				if (i < ast.countChildren()) res += ", ";
 			}
 		}
-		res += "} ";
+		res += "}";
 	}
 	return res;
 }

@@ -33,12 +33,6 @@ M.cfg = {
 		highlights = { -- table
 			sign = { link = '@conceal' }, -- sign before result
 			result = { link = '@string' }, -- normal result
-			flash = { fg = 'fg' } -- flashing result
-		},
-
-		flash = { -- table
-			enable = true, -- boolean
-			duration = 0.05, -- how long each step should be, in seconds
 		},
 
 		-- diagnostic options (false to respect the options in your Neovim config)
@@ -54,13 +48,11 @@ M.cfg = {
 
 	_sign_hl = 'QalcSign',
 	_result_hl = 'QalcResult',
-	_flash_hl = 'QalcFlash',
 }
 
 local function rehighlight()
 	vim.api.nvim_set_hl(0, M.cfg._sign_hl, M.cfg.display.highlights.sign)
 	vim.api.nvim_set_hl(0, M.cfg._result_hl, M.cfg.display.highlights.result)
-	vim.api.nvim_set_hl(0, M.cfg._flash_hl, M.cfg.display.highlights.flash)
 end
 
 local function deep_extend_inplace(dest, src)

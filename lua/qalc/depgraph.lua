@@ -179,7 +179,7 @@ function M:get_cascade(start_extmark, broken_dependents)
 			if sub_in_degree[id] > 0 then
 				self.cycle_errors[id] = true
 				diags[id] = {{
-					message = "Reference cycle found, refusing to evaluate",
+					message = 'Reference cycle found, refusing to evaluate',
 					severity = vim.diagnostic.severity.ERROR
 				}}
 				-- add to the cascade the callback sees the diagnostic and skips eval

@@ -38,8 +38,9 @@ function M.submit(type, bufnr, extmark, payload)
 		end
 	elseif type == M.JobType.PARSE_LINE then
 		if is_forbidden or is_blank then
-			output.clear(bufnr, extmark)
-			-- force parser to evaluate empty string to update depgraph in callback
+			-- force parser to parse empty string to update depgraph in callback
+			-- we can't update it directly because race conditions might occur
+			-- sending jobs enforces a strict order since they are queued on the worker thread
 			payload = ''
 		end
 	end
@@ -72,7 +73,7 @@ function M.register_callback(attached_bufs)
 			local total_lines = vim.api.nvim_buf_line_count(bufnr)
 			for _, id in ipairs(cascade) do
 				if dep_diags and dep_diags[id] then
-					require('qalc.output').render(bufnr, id, "", dep_diags[id])
+					require('qalc.output').render(bufnr, id, '', dep_diags[id])
 
 					-- TODO: if there are depgraph errors other than cyclic, we have to distinguish
 					-- for now, only cyclic errors are possible, so this is fine
@@ -87,19 +88,17 @@ function M.register_callback(attached_bufs)
 					local pos = vim.api.nvim_buf_get_extmark_by_id(bufnr, ns_track, id, {})
 					if #pos > 0 then
 						local lnum = pos[1]
-
-						-- ensure the line actually exists in the buffer (dont try to read past end)
 						if lnum < total_lines then
-							-- find the active mark (first one) on this line
-							-- local active_mark = vim.api.nvim_buf_get_extmarks(
-							-- 	bufnr, ns_track, {lnum, 0}, {lnum, -1}, { limit = 1 }
-							-- )
+							local line_marks = vim.api.nvim_buf_get_extmarks(
+								bufnr, ns_track, {lnum, 0}, {lnum, -1}, { limit = 1 }
+							)
 
-							-- only evaluate once for the active mark
-							-- if #active_mark > 0 and active_mark[1][1] == id then
-								local text = vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or ""
+							if #line_marks > 0 and line_marks[1][1] == id then
+								-- active mark, safe to evaluate
+								local text = vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or ''
 								M.submit(M.JobType.EVAL_LINE, bufnr, id, text)
-							-- end
+							end
+							-- in case of ghost, do nothing
 						end
 					end
 				end
@@ -108,7 +107,7 @@ function M.register_callback(attached_bufs)
 	end
 
 	local dummy = vim.uv.new_timer()
-	assert(dummy, "unable to initialize qalc.nvim: uv timer is nil")
+	assert(dummy, 'unable to initialize qalc.nvim: uv timer is nil')
 	lib.init_loop(dummy)
 	dummy:close()
 

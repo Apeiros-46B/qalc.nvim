@@ -134,6 +134,7 @@ PrintOptions Job::get_print_options() {
 
 EvaluationOptions Job::get_eval_options() {
 	EvaluationOptions opts;
+	opts.parse_options = get_parse_options();
 	return opts;
 }
 
