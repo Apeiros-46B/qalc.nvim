@@ -10,6 +10,9 @@ local M = {}
 -- bufnr -> tracking_extmark_id -> [ diag1, diag2, ... ]
 local diag_cache = {}
 
+-- bufnr -> tracking_extmark_id -> string
+local result_cache = {}
+
 -- flush diagnostics to neovim for a specific buf
 local function flush_diags(bufnr)
 	if not diag_cache[bufnr] then return end
@@ -59,6 +62,11 @@ function M.clear(bufnr, tracking_mark)
 	end
 end
 
+-- clear all extmarks
+function M.clear_all(bufnr)
+	vim.api.nvim_buf_clear_namespace(bufnr, ns_ui, 0, -1)
+end
+
 -- update one extmark
 function M.render(bufnr, tracking_mark, output, diags)
 	local pos = vim.api.nvim_buf_get_extmark_by_id(bufnr, ns_track, tracking_mark, {})
@@ -73,9 +81,9 @@ function M.render(bufnr, tracking_mark, output, diags)
 		local virt_text = {}
 
 		if cfg.display.sign ~= false then
-			virt_text[#virt_text+1] = { cfg.display.sign .. ' ', cfg.display.highlights.sign }
+			virt_text[#virt_text+1] = { cfg.display.sign .. ' ', cfg._sign_hl }
 		end
-		virt_text[#virt_text+1] = { output, cfg.display.highlights.result }
+		virt_text[#virt_text+1] = { output, cfg._result_hl }
 
 		vim.api.nvim_buf_set_extmark(bufnr, ns_ui, row, 0, {
 			virt_text = virt_text,
@@ -86,6 +94,11 @@ function M.render(bufnr, tracking_mark, output, diags)
 			invalidate = true,
 			undo_restore = false,
 		})
+		result_cache[bufnr] = result_cache[bufnr] or {}
+		result_cache[bufnr][tracking_mark] = output
+	else
+		result_cache[bufnr] = result_cache[bufnr] or {}
+		result_cache[bufnr][tracking_mark] = nil
 	end
 
 	diag_cache[bufnr] = diag_cache[bufnr] or {}
@@ -95,6 +108,29 @@ function M.render(bufnr, tracking_mark, output, diags)
 		diag_cache[bufnr][tracking_mark] = nil
 	end
 	flush_diags(bufnr)
+end
+
+-- yank result at current line in the given buf into the given register
+function M.yank_result(register)
+	local bufnr = vim.fn.bufnr()
+	local lnum = vim.api.nvim_win_get_cursor(0)[1] - 1 -- :h api-indexing
+
+	local tracking_marks = vim.api.nvim_buf_get_extmarks(
+		bufnr, ns_track, {lnum, 0}, {lnum, -1}, { limit = 1 }
+	)
+	if tracking_marks == nil or #tracking_marks == 0 then
+		vim.notify('qalc: Unable to find extmark on current line')
+		return
+	end
+
+	local tracking_mark = tracking_marks[1][1]
+	local val = result_cache[bufnr][tracking_mark]
+	if val == nil or val == '' then
+		vim.notify('qalc: No result on current line')
+		return
+	end
+
+	vim.fn.setreg(register, val)
 end
 
 return M

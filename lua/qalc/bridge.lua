@@ -12,6 +12,38 @@ M.JobType = {
 }
 
 function M.submit(type, bufnr, extmark_id, payload)
+	local output = require('qalc.output')
+
+	-- strip comments
+	if (type == M.JobType.EVAL_LINE or type == M.JobType.PARSE_LINE) then
+		payload = payload:gsub('#.*$', '')
+	end
+
+	-- don't allow legacy function syntax, too hard to parse for depgraph
+	local is_forbidden = payload:match('^%s*function%s+')
+	local is_blank = not payload:match('%S')
+
+	if type == M.JobType.EVAL_LINE then
+		if is_forbidden then
+			local diags = {{
+				message = 'Legacy "function" syntax disabled. Use f(x) := ...',
+				severity = vim.diagnostic.severity.ERROR
+			}}
+			output.render(bufnr, extmark_id, '', diags)
+			return
+		elseif is_blank then
+			-- clear stale results for blank lines
+			output.clear(bufnr, extmark_id)
+			return
+		end
+	elseif type == M.JobType.PARSE_LINE then
+		if is_forbidden or is_blank then
+			output.clear(bufnr, extmark_id)
+			-- force parser to evaluate empty string to update depgraph in callback
+			payload = ''
+		end
+	end
+
 	lib.submit_job(type, bufnr, extmark_id, payload)
 end
 
@@ -56,9 +88,7 @@ function M.register_callback(attached_bufs)
 							-- only evaluate once for the active mark
 							if #active_mark > 0 and active_mark[1][1] == id then
 								local text = vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or ""
-								if text:match("%S") then
-									M.submit(M.JobType.EVAL_LINE, bufnr, id, text)
-								end
+								M.submit(M.JobType.EVAL_LINE, bufnr, id, text)
 							end
 						end
 					end

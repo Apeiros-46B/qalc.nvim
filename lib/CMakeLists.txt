@@ -12,6 +12,7 @@ pkg_check_modules(QALC REQUIRED libqalculate>=5.0.0)
 
 add_library(${PROJECT_NAME} SHARED
 	src/lib.cpp
+	src/math.cpp
 	src/util.cpp
 	src/worker.cpp
 )

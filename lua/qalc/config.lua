@@ -29,10 +29,16 @@ M.cfg = {
 		-- 'extend': virtual text at end of line + aligned virtual lines
 		multiline_style = 'below', -- boolean
 
-		-- highlight groups
-		highlights = {
-			sign	 = '@conceal', -- sign before result
-			result = '@string',  -- result in virtual text
+		-- highlight groups (see `:h nvim_set_hl()`)
+		highlights = { -- table
+			sign = { link = '@conceal' }, -- sign before result
+			result = { link = '@string' }, -- normal result
+			flash = { fg = 'fg' } -- flashing result
+		},
+
+		flash = { -- table
+			enable = true, -- boolean
+			duration = 0.05, -- how long each step should be, in seconds
 		},
 
 		-- diagnostic options (false to respect the options in your Neovim config)
@@ -45,7 +51,17 @@ M.cfg = {
 			severity_sort = true,
 		},
 	},
+
+	_sign_hl = 'QalcSign',
+	_result_hl = 'QalcResult',
+	_flash_hl = 'QalcFlash',
 }
+
+local function rehighlight()
+	vim.api.nvim_set_hl(0, M.cfg._sign_hl, M.cfg.display.highlights.sign)
+	vim.api.nvim_set_hl(0, M.cfg._result_hl, M.cfg.display.highlights.result)
+	vim.api.nvim_set_hl(0, M.cfg._flash_hl, M.cfg.display.highlights.flash)
+end
 
 local function deep_extend_inplace(dest, src)
 	for k, v in pairs(src) do
@@ -59,9 +75,12 @@ end
 
 function M.setup(new_cfg)
 	deep_extend_inplace(M.cfg, new_cfg)
+	rehighlight()
 	if M.cfg.diagnostics ~= false then
 		vim.diagnostic.config(M.cfg.diagnostics, ns_ui)
 	end
 end
+
+rehighlight()
 
 return M

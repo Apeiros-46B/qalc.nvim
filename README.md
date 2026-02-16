@@ -2,11 +2,13 @@
 
 This branch is not yet ready for use. Before then, I need to finish the following:
 
+- Finalizing the dependency graph (instead of using the dummy implementation)
+- Adding the configurable flash effect on recalculation
+- Adding `:QalcAbort` command to stop all queued jobs in case user pastes huge string
+- Adding `:QalcRefresh` command to re-eval the entire buffer and rebuild the extmarks and depgraph in case issues are encountered
 - Writing a CMake package for `libqalculate` so that users don't have to have `pkg-config` installed in order to build the plugin
-- Fix `:QalcYank`
-- Fix significant bug: After typing in a variable assignment, the variable remains even after the line has been deleted
-  - Related: Variables are shared between multiple buffers, when they shouldn't be
-- Reimplement the `set` command that alters the `PrintOptions` and `EvaluationOptions` (this is normally implemented by the `qalc` program, but qalc.nvim now uses the library directly, so this functionality needs to be separately addressed)
+- Implementing a way to alter the `PrintOptions` and `EvaluationOptions` (this is normally done with `set` in the `qalc` program, but qalc.nvim now uses the library directly, so this functionality needs to be separately addressed)
+- Making a cmp completion provider
 
 # qalc.nvim
 
@@ -135,7 +137,6 @@ Keep in mind that this plugin is still under development so configuration keys m
 The following is a list of things I will most likely change/implement in the future (when I have enough free time). Items are ordered by priority, descending.
 
 - (feat) Re-implementing the functionality of the `qalc` CLI commands such as "set" and "delete"
-- (perf) Make recalculation async instead of blocking the main thread
 - (perf) Only recalculating what is necessary instead of recalculating the whole buffer on every update
 - (feat) Adding fancy visual effect (optional) when values are recalculated
 - (feat) Adding [nvim-cmp](https://github.com/hrsh7th/nvim-cmp) integration for completion of variables, functions, and units

@@ -1,5 +1,3 @@
-#include <atomic>
-#include <condition_variable>
 #include <mutex>
 #include <queue>
 #include <thread>
@@ -15,6 +13,7 @@ extern "C" {
 #include <libqalculate/Variable.h>
 #include <uv.h>
 
+#include "math.hpp"
 #include "util.hpp"
 #include "worker.hpp"
 
@@ -113,7 +112,7 @@ Worker::Worker(lua_State* L): L{L} {
 	calc->loadGlobalDefinitions();
 
 	// async remains uninitialized!
-	// these must be called before submitting any jobs:
+	// these MUST be called before submitting any jobs:
 	// - init_async
 	// - set_callback
 
@@ -124,6 +123,7 @@ Worker::Worker(lua_State* L): L{L} {
 // TODO: extract options
 ParseOptions Job::get_parse_options() {
 	ParseOptions opts;
+	opts.limit_implicit_multiplication = true;
 	return opts;
 }
 
@@ -242,8 +242,7 @@ static void parse_line(Calculator* calc, Job& job, JobResult& result) {
 	MathStructure ast;
 	calc->parse(&ast, job.payload, job.get_parse_options());
 	get_diagnostics(calc, result);
-
-	// TODO: walk ast and populate result.assigned_symbols & result.read_symbols
+	extract_symbols(ast, result.in_syms, result.out_syms);
 }
 
 // worker thread
@@ -256,6 +255,13 @@ static void eval_line(Calculator* calc, Job& job, JobResult& result) {
 		job.get_print_options()
 	);
 	get_diagnostics(calc, result);
+
+	// for debugging symbol extraction
+	// MathStructure ast;
+	// calc->parse(&ast, job.payload, job.get_parse_options());
+	// get_diagnostics(calc, result);
+	// extract_symbols(ast, result.in_syms, result.out_syms);
+	// result.output = dump_ast(ast);
 }
 
 // worker thread

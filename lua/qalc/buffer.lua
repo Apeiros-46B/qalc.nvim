@@ -1,4 +1,4 @@
--- handle buffer creation, attach/detach, and yanking result
+-- handle buffer creation, attach/detach, and job submission
 local ns_track = vim.api.nvim_create_namespace('qalc_track')
 local cfg = require('qalc.config').cfg
 local bridge = require('qalc.bridge')
@@ -7,7 +7,7 @@ local M = {}
 
 -- mapping of bufnr -> depgraph
 local attached_bufs = {}
--- mapping of bufnr -> bool, all buffers in this set should be detached from
+-- mapping of bufnr -> bool, all buffers in this set should be detached from asap
 local detach_queue = {}
 
 local cur_active_buf = nil
@@ -34,7 +34,7 @@ function M.queue_detach(bufnr)
 	-- referenced in nvim_buf_attach callback to actually detach the callback
 	detach_queue[bufnr] = true
 
-	require('qalc.output').clear(bufnr)
+	require('qalc.output').clear_all(bufnr)
 end
 local function detach(bufnr)
 	detach_queue[bufnr] = nil
@@ -72,7 +72,6 @@ function M.attach(bufnr)
 		for _, mark in ipairs(eof_marks) do
 			local id = mark[1]
 			bridge.submit(bridge.JobType.PARSE_LINE, bufnr, id, "")
-			require('qalc.output').clear(bufnr, id)
 		end
 
 		-- determine which lines have been modified
@@ -107,7 +106,6 @@ function M.attach(bufnr)
 					-- it seems inefficient, but it's the only way we can get the depgraph
 					-- to update correctly
 					bridge.submit(bridge.JobType.PARSE_LINE, bufnr, active_id, "")
-					require('qalc.output').clear(bufnr, active_id)
 				end
 
 				-- ghost marks must also be routed through callback to prune from depgraph
@@ -115,7 +113,6 @@ function M.attach(bufnr)
 					for j = 2, #marks do
 						local ghost_id = marks[j][1]
 						bridge.submit(bridge.JobType.PARSE_LINE, bufnr, ghost_id, "")
-						require('qalc.output').clear(bufnr, ghost_id)
 					end
 				end
 			end
@@ -164,12 +161,10 @@ function M.focus_buffer(bufnr)
 			local lines = vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)
 			local text = lines[1] or ""
 
-			if text:match("%S") then
-				-- direct eval, don't go through the depgraph
-				-- the depgraph state is already maintained properly, the only reason we need to do
-				-- this is to "synchronize" the libqalculate Calculator state with the new buffer
-				bridge.submit(bridge.JobType.EVAL_LINE, bufnr, extmark_id, text)
-			end
+			-- direct eval, don't go through the depgraph
+			-- the depgraph state is already maintained properly, the only reason we need to do
+			-- this is to "synchronize" the libqalculate Calculator state with the new buffer
+			bridge.submit(bridge.JobType.EVAL_LINE, bufnr, extmark_id, text)
 		end
 	end
 end
