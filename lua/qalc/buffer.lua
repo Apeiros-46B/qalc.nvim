@@ -88,9 +88,7 @@ function M.attach(bufnr)
 
 			if #marks == 0 then -- no extmarks exist on this line yet
 				-- make a new mark
-				local new_id = vim.api.nvim_buf_set_extmark(bufnr, ns_track, lnum, 0, {
-					right_gravity = false -- keep at column 0 instead of drifting rightwards
-				})
+				local new_id = vim.api.nvim_buf_set_extmark(bufnr, ns_track, lnum, 0, {})
 
 				if text:match("%S") then
 					bridge.submit(bridge.JobType.PARSE_LINE, bufnr, new_id, text)
@@ -150,7 +148,7 @@ function M.focus_buffer(bufnr)
 
 	-- evaluate all lines in order
 	for _, mark in ipairs(marks) do
-		local extmark_id = mark[1]
+		local extmark = mark[1]
 		local lnum = mark[2]
 
 		-- if we haven't seen this row yet, this is the active mark and not a ghost. otherwise,
@@ -164,7 +162,7 @@ function M.focus_buffer(bufnr)
 			-- direct eval, don't go through the depgraph
 			-- the depgraph state is already maintained properly, the only reason we need to do
 			-- this is to "synchronize" the libqalculate Calculator state with the new buffer
-			bridge.submit(bridge.JobType.EVAL_LINE, bufnr, extmark_id, text)
+			bridge.submit(bridge.JobType.EVAL_LINE, bufnr, extmark, text)
 		end
 	end
 end

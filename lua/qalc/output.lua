@@ -13,6 +13,9 @@ local diag_cache = {}
 -- bufnr -> tracking_extmark_id -> string
 local result_cache = {}
 
+-- bufnr -> tracking_extmark_id -> uv_handle_t
+local flash_timers = {}
+
 -- flush diagnostics to neovim for a specific buf
 local function flush_diags(bufnr)
 	if not diag_cache[bufnr] then return end
@@ -29,7 +32,7 @@ local function flush_diags(bufnr)
 				diag_copy.bufnr = bufnr
 				diag_copy.lnum = lnum
 				diag_copy.col = 0
-				table.insert(all_diags, diag_copy)
+				all_diags[#all_diags+1] = diag_copy
 			end
 		else
 			-- extmark was deleted by user
@@ -83,9 +86,14 @@ function M.render(bufnr, tracking_mark, output, diags)
 		if cfg.display.sign ~= false then
 			virt_text[#virt_text+1] = { cfg.display.sign .. ' ', cfg._sign_hl }
 		end
-		virt_text[#virt_text+1] = { output, cfg._result_hl }
+		if cfg.display.flash.enable then
+			virt_text[#virt_text+1] = { output, cfg._flash_hl }
+		else
+			virt_text[#virt_text+1] = { output, cfg._result_hl }
+		end
 
-		vim.api.nvim_buf_set_extmark(bufnr, ns_ui, row, 0, {
+		-- TODO: there are some final bugs with UI marks piling up or being deleted on redo
+		local ui_mark = vim.api.nvim_buf_set_extmark(bufnr, ns_ui, row, 0, {
 			virt_text = virt_text,
 			virt_text_pos = 'eol',
 			hl_mode = 'combine',
@@ -94,6 +102,50 @@ function M.render(bufnr, tracking_mark, output, diags)
 			invalidate = true,
 			undo_restore = false,
 		})
+
+		if cfg.display.flash.enable then
+			flash_timers[bufnr] = flash_timers[bufnr] or {}
+
+			-- cancel flash timer for this mark
+			if flash_timers[bufnr][tracking_mark] ~= nil then
+				flash_timers[bufnr][tracking_mark]:stop()
+				if not flash_timers[bufnr][tracking_mark]:is_closing() then
+					flash_timers[bufnr][tracking_mark]:close()
+				end
+				flash_timers[bufnr][tracking_mark] = nil
+			end
+
+			-- start timer to revert to the normal highlight group
+			local timer = vim.uv.new_timer()
+
+			if timer ~= nil then
+				flash_timers[bufnr][tracking_mark] = timer
+				timer:start(cfg.display.flash.duration * 1000, 0, vim.schedule_wrap(function()
+					flash_timers[bufnr][tracking_mark] = nil
+
+					if not timer:is_closing() then timer:close() end
+					if not vim.api.nvim_buf_is_valid(bufnr) then return end
+
+					local cur_pos = vim.api.nvim_buf_get_extmark_by_id(
+						bufnr,
+						ns_track,
+						tracking_mark,
+						{}
+					)
+					if cur_pos and #cur_pos > 0 then
+						local cur_lnum = cur_pos[1]
+						virt_text[#virt_text][2] = cfg._result_hl
+						vim.api.nvim_buf_set_extmark(bufnr, ns_ui, cur_lnum, 0, {
+							id = ui_mark,
+							virt_text = virt_text,
+							virt_text_pos = 'eol',
+							hl_mode = 'combine',
+						})
+					end
+				end))
+			end
+		end
+
 		result_cache[bufnr] = result_cache[bufnr] or {}
 		result_cache[bufnr][tracking_mark] = output
 	else
