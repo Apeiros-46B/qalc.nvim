@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <condition_variable>
-#include <libqalculate/includes.h>
 #include <mutex>
 #include <queue>
 #include <string>
@@ -13,7 +12,11 @@ extern "C" {
 #include <lauxlib.h>
 }
 #include <libqalculate/Calculator.h>
+#include <libqalculate/includes.h>
 #include <uv.h>
+
+#include "math.hpp"
+#include "util.hpp"
 
 namespace worker {
 
@@ -26,26 +29,21 @@ int lua_init_loop(lua_State* L);
 int lua_submit_job(lua_State* L);
 int lua_set_callback(lua_State* L);
 
-// matches vim.diagnostic.severity (can verify with vim.inspect())
-enum class Severity: int {
-	ERROR = 1,
-	WARN = 2,
-	INFO = 3,
-	HINT = 4,
-};
-
-// matches enum in lua bridge
+// matches enum in util.lua
 enum class JobType: int {
 	DELETE_SYM = 1,
 	CLEAR_SYMS = 2,
 	PARSE_LINE = 3,
 	EVAL_LINE = 4,
-	// GET_DEFS = 5,
+	GET_DEFS = 5,
+	ABORT = 6,
 };
 
 struct Diagnostic {
 	Severity severity;
 	std::string msg;
+
+	static void to_lua(lua_State* L, const Diagnostic& self);
 };
 
 // TODO: take in print options
@@ -54,10 +52,11 @@ struct Job {
 	int bufnr;
 	int extmark_id;
 
-	// when type is DELETE_SYM: payload = the symbol to delete
-	// when type is CLEAR_SYMS: payload = undefined
-	// when type is PARSE_LINE: payload = the line to parse
-	// when type is EVAL_LINE: payload = the line to eval
+	// when type is DELETE_SYM, payload = the symbol to delete
+	// when type is CLEAR_SYMS, payload = undefined
+	// when type is PARSE_LINE, payload = the line to parse
+	// when type is EVAL_LINE, payload = the line to eval
+	// otherwise undefined
 	std::string payload;
 
 	ParseOptions get_parse_options();
@@ -65,14 +64,14 @@ struct Job {
 	EvaluationOptions get_eval_options();
 };
 
-// TODO: add diagnostics
 struct JobResult {
-	// can never be DELETE_SYM or CLEAR_SYMS, they return no results
+	// can never be DELETE_SYM, CLEAR_SYMS, or ABORT, they return no results
 	JobType type;
 	int bufnr;
 	int extmark_id;
 
-	// only defined when type is EVAL_LINE, in which case it is the calculation result
+	// when type is EVAL_LINE, output = calculation result
+	// otherwise undefined
 	std::string output;
 
 	// empty unless type is PARSE_LINE, EVAL_LINE
@@ -81,6 +80,9 @@ struct JobResult {
 	// empty unless type is PARSE_LINE
 	std::vector<std::string> out_syms;
 	std::vector<std::string> in_syms;
+
+	// empty unless type is GET_DEFS
+	std::vector<Definition> definitions;
 };
 
 class Worker {
@@ -111,6 +113,7 @@ private:
 
 	void main_loop();
 	void process_results();
+	void purge_eval_queue(const std::string& msg);
 
 	static void callback(uv_async_t* handle);
 

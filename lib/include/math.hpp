@@ -3,8 +3,87 @@
 #include <string>
 #include <vector>
 
-#include <libqalculate/Calculator.h>
 #include <libqalculate/MathStructure.h>
+#include <libqalculate/Prefix.h>
+#include <libqalculate/Unit.h>
+#include <libqalculate/Variable.h>
+#include <libqalculate/includes.h>
+
+#include "util.hpp"
+
+struct Definition {
+	LspKind type;
+	std::string ref_name;
+	std::string input_name;
+	std::string documentation; // fully formatted markdown string
+	std::vector<std::string> all_names;
+
+	static const char* to_lua_kv(lua_State* L, const Definition& self);
+};
+
+void populate_def(Calculator* calc, Variable* var, PrintOptions po, Definition& def);
+void populate_def(Calculator* calc, Unit* unit, PrintOptions po, Definition& def);
+void populate_def(
+	Calculator* calc,
+	MathFunction* func,
+	PrintOptions po,
+	Definition& def
+);
+
+template<typename T>
+void get_all_names(T* expr, std::vector<std::string>& all_names) {
+	for (size_t i = 1; i <= expr->countNames(); ++i) {
+		all_names.push_back(expr->getName(i).name);
+	}
+}
+
+// make a definition from an expr and push it to a list of definitions
+template<typename T>
+void push_def(
+	Calculator* calc,
+	T* expr,
+	PrintOptions po,
+	std::vector<Definition>& defs
+) {
+	if (expr->isLocal() || !expr->isActive()) {
+		return;
+	}
+
+	Definition def;
+	def.ref_name = expr->referenceName();
+	def.input_name = expr->preferredInputName().name;
+
+	get_all_names(expr, def.all_names);
+
+	std::string disp_name = expr->preferredDisplayName(false, po.use_unicode_signs).name;
+	std::string disp_abbr = expr->preferredDisplayName(true, po.use_unicode_signs).name;
+	std::string title = expr->title(false, true);
+
+	def.documentation = "**" + disp_name + "**";
+	if (!disp_abbr.empty() && disp_abbr != disp_name) {
+		def.documentation += " (" + disp_abbr + ")";
+	}
+	if (!title.empty()) {
+		def.documentation += ": " + title;
+	}
+
+	populate_def(calc, expr, po, def);
+
+	std::string desc = expr->description();
+	if (!desc.empty()) {
+		def.documentation += "\n\n" + strings::preprocess_str(desc);
+	}
+
+	defs.push_back(std::move(def));
+}
+
+// isn't a populate_def overload because it's a special case
+void push_prefix_def(
+	Calculator* calc,
+	Prefix* prefix,
+	PrintOptions po,
+	std::vector<Definition>& defs
+);
 
 // check if a string is a single symbol
 bool is_valid_var_name(const std::string& s);

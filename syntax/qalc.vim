@@ -3,13 +3,10 @@ if exists("b:current_syntax")
 endif
 
 let b:current_syntax = "qalc"
-syn iskeyword a-z,A-Z,_
 
-syn match   qalcName     '\a*'
-" TODO: add these programmatically somehow, dont want to write them all down
-syn keyword qalcConstant e i pi infinity undefined true false yes no answer today tomorrow uptime precision thousand million billion trillion
-syn match   qalcConstant 'ans[1-5]\?'
-syn keyword qalcFunction plot lcm gcd abs floor ceil trunc round int frac im re sqrt root sin cos tan sec csc cot sinh cosh tanh sech csch coth asin acos atan atan2 asec acsc acot asinh acosh atanh asech acsch acoth ln limit diff derivative integrate integral extremum sum product dimension inv det identity vector dot cross magnitude mean median mode stderr stdev total horzcat vertcat mergevectors multisolve replace if for foreach
+syn iskeyword @,48-57,$,_,192-255
+
+syn match   qalcName     '\k\+'
 syn match   qalcFunction 'exp2\|exp10\|exp\|log2\|log10\|log\|matrix2vector\|matrix\|solve2\|solve'
 syn match   qalcUnknown  /'[^']*'\|"[^"]*"\|\\\a\|[knpqrwxyzXYZ]*\(\a\@!\)/
 syn match   qalcOperator '[+\-*/^%!&|<>=]\|to\|:='
@@ -19,9 +16,19 @@ syn match   qalcLiteral  '-\?0x\x\+\(\.\x\+\)\?\(p-\?\d\+\)\?' " hexadecimal
 syn match   qalcLiteral  '-\?0o\o\+\(\.\o\+\)\?' " octal
 syn match   qalcLiteral  '-\?0b[01]\+\(\.[01]\+\)\?' " binary
 
-hi def link qalcLiteral  Number
-hi def link qalcConstant Number
-hi def link qalcFunction Function
-hi def link qalcUnknown  Type
-hi def link qalcOperator Operator
-hi def link qalcComment  Comment
+lua<<EOF
+local bridge = package.loaded['qalc.bridge']
+if bridge then
+	bridge.syntax_highlight()
+end
+EOF
+
+" some of these are generated dynamically, see bridge.lua
+hi def link qalcLiteral    Number
+hi def link qalcConstant   Constant
+hi def link qalcFunction   Function
+hi def link qalcPrefixUnit Type
+hi def link qalcUnit       Type
+hi def link qalcUnknown    Keyword
+hi def link qalcOperator   Operator
+hi def link qalcComment    Comment

@@ -10,7 +10,7 @@ extern "C" {
 #include <libqalculate/Calculator.h>
 #include <libqalculate/Function.h>
 #include <libqalculate/MathStructure.h>
-#include <libqalculate/Variable.h>
+#include <libqalculate/includes.h>
 #include <uv.h>
 
 #include "math.hpp"
@@ -20,6 +20,13 @@ extern "C" {
 namespace worker {
 
 static Worker* worker = nullptr;
+
+void Diagnostic::to_lua(lua_State* L, const Diagnostic& self) {
+	lua_createtable(L, 0, 2);
+	// :h vim.Diagnostic.Set
+	lua::push_and_set(L, static_cast<int>(self.severity), "severity");
+	lua::push_and_set(L, self.msg, "message");
+}
 
 void init_mt(lua_State* L) {
 	luaL_newmetatable(L, MT);
@@ -120,7 +127,9 @@ Worker::Worker(lua_State* L): L{L} {
 	worker_thread = std::thread(&Worker::main_loop, this);
 }
 
-// TODO: extract options
+// TODO: extract options. maybe we should set them once through a job and not query them
+// from each job? sending a bunch of options each time seems inefficient unless we plan
+// to support per-line pragmas (which is very difficult)
 ParseOptions Job::get_parse_options() {
 	ParseOptions opts;
 	opts.limit_implicit_multiplication = true;
@@ -129,6 +138,7 @@ ParseOptions Job::get_parse_options() {
 
 PrintOptions Job::get_print_options() {
 	PrintOptions opts;
+	opts.use_unicode_signs = true;
 	return opts;
 }
 
@@ -177,6 +187,13 @@ void Worker::set_callback(int ref) {
 
 // main thread
 void Worker::submit_job(Job&& job) {
+	if (job.type == JobType::ABORT) {
+		calc->abort();
+		purge_eval_queue("Calculation was manually aborted.");
+		uv_async_send(async_handle);
+		return;
+	}
+
 	{
 		std::lock_guard<std::mutex> lock(queue_mutex);
 		input.push(std::move(job));
@@ -266,6 +283,25 @@ static void eval_line(Calculator* calc, Job& job, JobResult& result) {
 }
 
 // worker thread
+// enumerate all global definitions
+static void get_defs(Calculator* calc, Job& job, JobResult& result) {
+	PrintOptions po = job.get_print_options();
+
+	for (auto* func : calc->functions) {
+		push_def(calc, func, po, result.definitions);
+	}
+	for (auto* var : calc->variables) {
+		push_def(calc, var, po, result.definitions);
+	}
+	for (auto* unit : calc->units) {
+		push_def(calc, unit, po, result.definitions);
+	}
+	for (auto* pref : calc->prefixes) {
+		push_prefix_def(calc, pref, po, result.definitions);
+	}
+}
+
+// worker thread
 void Worker::main_loop() {
 	while (true) {
 		Job job;
@@ -288,29 +324,45 @@ void Worker::main_loop() {
 		result.extmark_id = job.extmark_id;
 
 		try {
-			// delete and clear don't need to notify lua, they merely mutate the calculator state
-			// for subsequent operations. because these operations were queued in order we just
-			// execute them in order
-			if (job.type == JobType::DELETE_SYM) {
-				delete_sym(calc, job.payload);
-				continue;
-			} else if (job.type == JobType::CLEAR_SYMS) {
-				clear_syms(calc);
-				continue;
-			} else if (job.type == JobType::PARSE_LINE) {
-				parse_line(calc, job, result);
-			} else if (job.type == JobType::EVAL_LINE) {
-				eval_line(calc, job, result);
+			switch (job.type) {
+				// delete and clear don't need to notify lua, they merely mutate the calculator
+				// state for subsequent operations. because these operations were queued in
+				// order we just execute them in order
+				case JobType::DELETE_SYM: {
+					delete_sym(calc, job.payload);
+					continue;
+				}
+				case JobType::CLEAR_SYMS: {
+					clear_syms(calc);
+					continue;
+				}
+				case JobType::PARSE_LINE: {
+					parse_line(calc, job, result);
+					break;
+				}
+				case JobType::EVAL_LINE: {
+					eval_line(calc, job, result);
+					if (calc->aborted()) {
+						result.diagnostics.push_back({
+							Severity::ERROR,
+							"Calculation timed out or was aborted."
+						});
+						purge_eval_queue("Upstream dependency timed out or was aborted.");
+					}
+					break;
+				}
+				case JobType::GET_DEFS: {
+					get_defs(calc, job, result);
+					break;
+				}
+
+				// unreachable
+				case JobType::ABORT: break;
 			}
 		} catch (const std::exception& e) {
 			result.output = "";
 			result.diagnostics.clear();
-
-			Diagnostic diag;
-			diag.severity = Severity::ERROR;
-			diag.msg = e.what();
-
-			result.diagnostics.push_back(diag);
+			result.diagnostics.push_back({Severity::ERROR, e.what()});
 		}
 
 		// push results and notify main thread
@@ -320,12 +372,6 @@ void Worker::main_loop() {
 		}
 		uv_async_send(async_handle);
 	}
-}
-
-// main thread
-void Worker::callback(uv_async_t* handle) {
-	Worker* self = static_cast<Worker*>(handle->data);
-	self->process_results();
 }
 
 // main thread
@@ -347,30 +393,57 @@ void Worker::process_results() {
 			// push the callback onto the stack
 			lua_rawgeti(L, LUA_REGISTRYINDEX, callback_ref);
 
-			// push 7 args
+			// push 8 args
 			lua::push(L, static_cast<int>(res.type));
 			lua::push(L, res.bufnr);
 			lua::push(L, res.extmark_id);
 			lua::push(L, res.output);
-			lua::make_array<Diagnostic>(L, res.diagnostics, [](
-				lua_State* L,
-				const Diagnostic& diag
-			) {
-				lua_createtable(L, 0, 2);
-				// must match nvim diagnostic api keys exactly
-				lua::push_and_set(L, diag.msg, "message");
-				lua::push_and_set(L, static_cast<int>(diag.severity), "severity");
-			});
+			lua::make_array<Diagnostic>(L, res.diagnostics, Diagnostic::to_lua);
 			lua::make_array<std::string>(L, res.out_syms);
 			lua::make_array<std::string>(L, res.in_syms);
+			lua::make_table<Definition>(L, res.definitions, Definition::to_lua_kv);
 
 			// call
-			if (lua_pcall(L, 7, 0, 0) != LUA_OK) {
+			if (lua_pcall(L, 8, 0, 0) != LUA_OK) {
 				fprintf(stderr, "qalc error: %s\n", lua_tostring(L, -1));
 				lua_pop(L, 1);
 			}
 		}
 	}
+}
+
+// main thread or worker thread
+void Worker::purge_eval_queue(const std::string& msg) {
+	std::lock_guard<std::mutex> lock(queue_mutex);
+	std::queue<Job> kept_jobs;
+
+	while (!input.empty()) {
+		Job pending = std::move(input.front());
+		input.pop();
+
+		// only purge evaluations. we should preserve PARSE_LINE and other jobs so the
+		// depgraph never desyncs from calculator memory
+		if (pending.type == JobType::EVAL_LINE) {
+			JobResult result;
+			result.type = pending.type;
+			result.bufnr = pending.bufnr;
+			result.extmark_id = pending.extmark_id;
+			result.output = "";
+			result.diagnostics.push_back({Severity::ERROR, msg});
+
+			output.push(std::move(result));
+		} else {
+			kept_jobs.push(std::move(pending));
+		}
+	}
+
+	input = std::move(kept_jobs);
+}
+
+// main thread
+void Worker::callback(uv_async_t* handle) {
+	Worker* self = static_cast<Worker*>(handle->data);
+	self->process_results();
 }
 
 }

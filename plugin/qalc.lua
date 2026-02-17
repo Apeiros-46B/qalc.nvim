@@ -15,6 +15,14 @@ vim.api.nvim_create_user_command('QalcReset',
 	function(_) require('qalc.buffer').hard_reset() end,
 	{ nargs = 0 }
 )
+-- TODO: QalcAbort doesnt fully abort. current eval is cleared, but queued jobs are still in the queue
+vim.api.nvim_create_user_command('QalcAbort',
+	function(_) require('qalc.bridge').submit(
+		require('qalc.util').JobType.ABORT,
+		0, 0, ''
+	) end,
+	{ nargs = 0 }
+)
 vim.api.nvim_create_user_command('QalcYank',
 	function(cmd)
 		require('qalc.output').yank_result(
@@ -23,7 +31,6 @@ vim.api.nvim_create_user_command('QalcYank',
 	end,
 	{ nargs = '?' }
 )
--- TODO: QalcAbort command which clears job queue and stops current calculation
 
 local augroup = vim.api.nvim_create_augroup('QalcBufferManagement', { clear = true })
 

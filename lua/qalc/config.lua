@@ -46,6 +46,12 @@ M.cfg = {
 		},
 	},
 
+	integrations = {
+		cmp = {
+			enable = true, -- whether to enable cmp integration
+		},
+	},
+
 	_sign_hl = 'QalcSign',
 	_result_hl = 'QalcResult',
 }

@@ -8,7 +8,16 @@ M.JobType = {
 	CLEAR_SYMS = 2,
 	PARSE_LINE = 3,
 	EVAL_LINE = 4,
-	-- GET_DEFS = 5,
+	GET_DEFS = 5,
+	ABORT = 6,
+}
+
+M.LspKind = {
+	FUNC = vim.lsp.protocol.CompletionItemKind.Function,
+	VAR = vim.lsp.protocol.CompletionItemKind.Variable,
+	UNIT = vim.lsp.protocol.CompletionItemKind.Unit,
+	ENUM_MB = vim.lsp.protocol.CompletionItemKind.EnumMember,
+	CONST = vim.lsp.protocol.CompletionItemKind.Constant,
 }
 
 M.comment_pat = '#.*$'

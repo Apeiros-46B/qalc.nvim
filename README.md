@@ -2,25 +2,30 @@
 
 This branch is not yet ready for use. Before then, I need to finish the following:
 
-- Fixing critical bugs with depgraph (I think there is just one issue, which is the duplicate errors not disappearing when you delete the duplicates)
+- Don't show virtual text when input = output (trivial numeric constants)
+- Make it possible to disable definition scraping to lower memory usage
+- Fix critical bugs with depgraph (I think there is just one issue, which is the duplicate errors not disappearing when you delete the duplicates)
 - "A builtin unit or symbol was overriden" error is sometimes inconsistent (it only appears the first time). Maybe we just catch this directly in Lua instead of relying on qalc's message
-- Making a cmp completion provider
-- Adding `:QalcAbort` command to stop all queued jobs in case user pastes huge string
-- Writing a CMake package for `libqalculate` so that users don't have to have `pkg-config` installed in order to build the plugin
-- Implementing a way to alter the `PrintOptions` and `EvaluationOptions` (this is normally done with `set` in the `qalc` program, but qalc.nvim now uses the library directly, so this functionality needs to be separately addressed)
+- Add `:QalcAbort` command to stop all queued jobs in case user pastes huge string or accidentally starts long calculation
+- Add "temporary eval" mode in a prompt like the `=` register. Can also integrate with visual mode to evaluate the selected expression
+- Write a CMake package for `libqalculate` so that users don't have to have `pkg-config` installed in order to build the plugin
+- Implement a way to alter the `PrintOptions` and `EvaluationOptions` (this is normally done with `set` in the `qalc` program, but qalc.nvim now uses the library directly, so this functionality needs to be separately addressed)
 
 # qalc.nvim
 
 *inspired by [quickmath.nvim](https://github.com/jbyuki/quickmath.nvim)*
 
-A Neovim plugin for live calculations with unit conversions, equation solving, basic calculus functionality, and more. Powered by [`libqalculate`](https://github.com/Qalculate/libqalculate).
+A Neovim plugin for reactive spreadsheet-like calculations with unit conversions, algebra, calculus, graph plotting, and more. Powered by [`libqalculate`](https://github.com/Qalculate/libqalculate).
 
 ![screenshot](assets/screenshot.png)
 
 ## Features
 
-- Evaluates expressions in a Neovim buffer and updates results in virtual text on buffer content change
-- Shows warnings and errors from expressions as Neovim diagnostics
+- For supported functions, constants, units, etc, see [the `libqalculate` README](github.com/Qalculate/libqalculate#examples-expressions)
+- Syntax highlighting
+- Plotting (use `plot(f(x))` function)
+- Warnings and errors from expressions are shown as LSP diagnostics
+- [`nvim-cmp`](https://github.com/hrsh7th/nvim-cmp) integration for autocomplete of functions, constants, variables, and units
 
 ## Installation
 
@@ -32,17 +37,34 @@ Install using your preferred plugin manager:
 ```vim
 Plug 'Apeiros-46B/qalc.nvim', { 'do': { -> luafile build.lua } }
 ```
-If you use [Nix](https://nixos.org/), replace `build.lua` with `build_nix.lua`.
 
 - [lazy.nvim](https://github.com/folke/lazy.nvim)
 ```lua
-'Apeiros-46B/qalc.nvim'
+{
+    'Apeiros-46B/qalc.nvim',
+    opts = {},
+}
 ```
-If you use [Nix](https://nixos.org/), add a `build` entry:
+
+You can lazy load if you want (with `ft = 'qalc', cmd = 'Qalc'`) but most of the plugin loading is already deferred.
+
+### cmp integration
+
+Add `{ name = 'qalc' }` to your cmp sources. Loading should work perfectly if you use lazy.nvim. I have not tested cmp integration on other plugin managers.
+
+### Nix
+
+If you have [Nix](https://nixos.org/) available on your system, you can use it to build the C++ backend:
+
+```vim
+Plug 'Apeiros-46B/qalc.nvim', { 'do': { -> luafile build_nix.lua } }
+```
+
 ```lua
 {
     'Apeiros-46B/qalc.nvim',
     build = 'build_nix.lua',
+    opts = {},
 }
 ```
 
@@ -57,7 +79,13 @@ You can yank the result on the current line with `:QalcYank`, which takes an opt
 
 If the state of the buffer is somehow broken, you can use `:QalcReset` to force a rebuild of the dependency graph and re-evaluate every line.
 
-All commands accepted in the buffer are `qalc` commands.
+With the exception of interactive session commands (like `set`, `delete`, `info` etc), all lines are evaluated like `qalc` commands.
+
+## Potentially unexpected behaviours
+
+- 1:1 feature parity with `qalc` CLI frontend is a non-goal. Calling `qalc` as a subprocess is slow and prone to bugs, and perfectly emulating its behaviour using the C++ library is almost impossible [due to how complex their frontend is](https://github.com/Qalculate/libqalculate/blob/master/src/qalc.cc). Notable features that will not be supported are interactive commands (like `set` and `delete`), `ans` variables, and the legacy `function` syntax (use `f(x) := ...` instead).
+- If you constantly switch between multiple huge qalc buffers, you may experience some lag. This is due to a technical limitation of `libqalculate` (the `Calculator` is a stateful singleton), so the plugin has to clear the state and re-evaluate the entire buffer when you switch to it.
+- The buffer does not evaluate top-down like code; defined variables can referenced anywhere (akin to a 1D spreadsheet with named values).
 
 ## Configuration
 

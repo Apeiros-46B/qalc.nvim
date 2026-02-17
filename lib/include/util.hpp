@@ -8,6 +8,29 @@ extern "C" {
 #include <lauxlib.h>
 }
 
+// matches vim.diagnostic.severity (can verify with vim.inspect())
+enum class Severity: int {
+	ERROR = 1,
+	WARN = 2,
+	INFO = 3,
+	HINT = 4,
+};
+
+// matches vim.lsp.protocol.CompletionItemKind
+enum class LspKind : int {
+	FUNC = 3,
+	VAR = 6,
+	UNIT = 11,
+	ENUM_MB = 20,
+	CONST = 21,
+};
+
+namespace strings {
+
+std::string preprocess_str(const std::string& text, bool align_newlines = false);
+
+}
+
 namespace lua {
 
 class StackGuard {
@@ -73,7 +96,7 @@ template<typename T, typename Collection>
 inline void make_array(lua_State* L, Collection& iter) {
 	lua_createtable(L, static_cast<int>(iter.size()), 0);
 	int i = 1;
-	for (T& v : iter) {
+	for (const T& v : iter) {
 		lua::push_and_seti(L, v, i++);
 	}
 }
@@ -90,6 +113,21 @@ inline void make_array(
 	for (T& v : iter) {
 		fn(L, v);
 		lua_rawseti(L, -2, i++);
+	}
+}
+
+// the callable should push one item when called with (lua_State* L, T value)
+// and return a c string key
+template<typename T, typename Collection, typename Callable>
+inline void make_table(
+	lua_State* L,
+	Collection& iter,
+	Callable fn
+) {
+	lua_createtable(L, 0, static_cast<int>(iter.size()));
+	for (T& v : iter) {
+		const char* key = fn(L, v);
+		lua_setfield(L, -2, key);
 	}
 }
 

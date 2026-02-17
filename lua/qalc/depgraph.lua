@@ -284,4 +284,10 @@ function M:get_full_sort()
 	return cascade, cycle_diags, dup_diags
 end
 
+function M:for_all_symbols(fn)
+	for sym, _ in pairs(self.extmarks) do
+		fn(sym)
+	end
+end
+
 return M

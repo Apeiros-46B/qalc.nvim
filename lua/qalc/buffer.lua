@@ -1,6 +1,5 @@
 -- handle buffer creation, attach/detach, and job submission
 local cfg = require('qalc.config').cfg
-local bridge = require('qalc.bridge')
 local util = require('qalc.util')
 
 local M = {}
@@ -15,8 +14,6 @@ local cur_active_buf = nil
 -- bufnr -> { min_lnum, max_lnum }
 local dirty_bufs = {}
 local flush_scheduled = false
-
-bridge.register_callback(M.attached_bufs)
 
 -- create buffer
 function M.new_buf(name)
@@ -53,6 +50,8 @@ function M.is_attached(bufnr)
 end
 
 local function flush_dirty_bufs()
+	local bridge = require('qalc.bridge')
+
 	-- runs when event loop is idle
 	flush_scheduled = false
 
@@ -121,6 +120,8 @@ end
 
 -- re-initialize a buffer completely
 function M.hard_reset(bufnr)
+	local bridge = require('qalc.bridge')
+
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 	if not M.is_attached(bufnr) then return end
 
@@ -155,6 +156,8 @@ end
 
 -- attach qalc to a buffer
 function M.attach(bufnr)
+	require('qalc.bridge').register_callback(M.attached_bufs)
+
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 	if M.is_attached(bufnr) then return true end
 
@@ -171,6 +174,8 @@ end
 
 -- update C++-side state in the newly focused buffer
 function M.focus_buffer(bufnr)
+	local bridge = require('qalc.bridge')
+
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 	if not M.is_attached(bufnr) or cur_active_buf == bufnr then return end
 	cur_active_buf = bufnr

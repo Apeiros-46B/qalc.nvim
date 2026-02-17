@@ -1,4 +1,4 @@
-// this is horrible and honestly most of it is LLM written, but it works (i think)
+// sym extraction is horrible and honestly some of it is LLM written, but it works
 // we rely on these assumptions:
 // - limit_implicit_multiplication is forced true (otherwise this would be impossible)
 // - legacy `function f 2\x` syntax is forbidden (use f(x) := 2x instead)
@@ -19,12 +19,256 @@
 #include <sstream>
 #include <vector>
 
+extern "C" {
+#include "lua.h"
+}
+#include <libqalculate/Calculator.h>
+#include <libqalculate/DataSet.h>
 #include <libqalculate/Function.h>
 #include <libqalculate/MathStructure.h>
+#include <libqalculate/Prefix.h>
 #include <libqalculate/Unit.h>
 #include <libqalculate/Variable.h>
+#include <libqalculate/includes.h>
 
 #include "math.hpp"
+#include "util.hpp"
+
+const char* Definition::to_lua_kv(lua_State* L, const Definition& self) {
+	lua_createtable(L, 0, 5);
+
+	lua::push_and_set(L, static_cast<int>(self.type), "type");
+	lua::push_and_set(L, self.ref_name, "ref_name");
+	lua::push_and_set(L, self.input_name, "input_name");
+	lua::push_and_set(L, self.documentation, "documentation");
+
+	lua::make_array<std::string>(L, self.all_names);
+	lua_setfield(L, -2, "all_names");
+
+	return self.ref_name.c_str();
+}
+
+// similar logic to libqalculate/qalc.cc "bool show_object_into(string name)"
+// TODO: handle subtypes for variables and units, not just functions
+void populate_def(
+	Calculator* calc,
+	Variable* var,
+	PrintOptions po,
+	Definition& def
+) {
+	def.type = var->isKnown() ? LspKind::CONST : LspKind::VAR;
+
+	std::string val = calc->print(var, 100, po);
+	if (!val.empty()) {
+		def.documentation += " = `" + val + "`";
+	}
+}
+void populate_def(
+	Calculator* calc,
+	Unit* unit,
+	PrintOptions po,
+	Definition& def
+) {
+	def.type = LspKind::UNIT;
+
+	std::string val = calc->print(unit, 100, po);
+	if (!val.empty()) {
+		def.documentation += " = `" + val + "`";
+	}
+}
+void populate_def(
+	Calculator* calc,
+	MathFunction* func,
+	PrintOptions po,
+	Definition& def
+) {
+	def.type = LspKind::FUNC;
+
+	int args_count = func->maxargs();
+	if (args_count < 0) {
+		args_count = std::max(
+			static_cast<int>(func->lastArgumentDefinitionIndex()),
+			func->minargs() + 1
+		);
+	}
+
+	std::string sig = "\n\n**Signature:** `" + def.input_name + "(";
+	std::string arg_list;
+
+	if (args_count == 0) {
+		sig += ")`";
+	} else {
+		arg_list = "\n\n**Arguments:**\n";
+
+		for (int i = 1; i <= args_count; ++i) {
+			Argument* arg = func->getArgumentDefinition(i);
+
+			std::string arg_name;
+			std::string arg_desc;
+
+			if (arg && !arg->name().empty()) {
+				arg_name = arg->name();
+			} else {
+				// fallback to numbered arguments
+				arg_name = "argument";
+				if (i > 1 || func->maxargs() != 1) {
+					arg_name += " " + std::to_string(i);
+				}
+			}
+
+			if (arg) {
+				arg_desc = strings::preprocess_str(arg->printlong());
+			} else {
+				// fallback to generic argument description
+				arg_desc = "a free value";
+			}
+
+			bool is_opt = (i > func->minargs());
+
+			if (i > 1) {
+				sig += is_opt ? "[, " : ", ";
+			} else {
+				sig += is_opt ? "[" : "";
+			}
+			sig += arg_name;
+
+			if (is_opt) {
+				sig += "]";
+			}
+
+			arg_list += "- `" + arg_name + "`: " + arg_desc;
+			if (is_opt) {
+				arg_list += " *(optional)*";
+				std::string default_val = func->getDefaultValue(i);
+				if (!default_val.empty() && default_val != "\"\"") {
+					arg_list += " *(default: " + default_val + ")*";
+				}
+			}
+			if (i != args_count) {
+				arg_list += "\n";
+			}
+		}
+
+		if (func->maxargs() < 0) {
+			sig += ", ...";
+		}
+
+		sig += ")`";
+	}
+
+	def.documentation += sig + arg_list;
+
+	// dataset handling (e.g. `atom()`)
+	if (func->subtype() == SUBTYPE_DATA_SET) {
+		DataSet* set = static_cast<DataSet*>(func);
+		def.documentation += "\n\n**Properties:**\n";
+
+		DataPropertyIter it;
+		DataProperty* prop = set->getFirstProperty(&it);
+
+		while (prop) {
+			if (!prop->isHidden()) {
+				std::string prop_str = "- ";
+
+				if (!prop->title(false).empty()) {
+					prop_str += "**" + prop->title() + "**: ";
+				}
+
+				for (size_t i = 1; i <= prop->countNames(); i++) {
+					if (i > 1) prop_str += ", ";
+					prop_str += "`" + prop->getName(i) + "`";
+				}
+
+				if (prop->isKey()) {
+					prop_str += " *(key)*";
+				}
+
+				if (!prop->description().empty()) {
+					std::string desc = prop->description();
+					prop_str += "\n  " + strings::preprocess_str(desc, true);
+				}
+
+				def.documentation += prop_str + "\n";
+			}
+			prop = set->getNextProperty(&it);
+		}
+	}
+
+	// expression macros like `gammainc = gamma(\x)-igamma(\x,\y)`
+	if (func->subtype() == SUBTYPE_USER_FUNCTION) {
+		UserFunction* userfunc = static_cast<UserFunction*>(func);
+
+		// TODO: do we need to pass ParseOptions in here?
+		std::string expr_str = calc->unlocalizeExpression(userfunc->formula());
+
+		for (size_t i = 1; i <= userfunc->countSubfunctions(); ++i) {
+			std::string search = "\\" + std::to_string(i);
+			std::string replace = userfunc->getSubfunction(i);
+
+			size_t pos = 0;
+			while ((pos = expr_str.find(search, pos)) != std::string::npos) {
+				expr_str.replace(pos, search.length(), replace);
+				pos += replace.length();
+			}
+		}
+
+		if (!expr_str.empty()) {
+			def.documentation += "\n\n**Expression:** `" + expr_str + "`";
+		}
+	}
+}
+
+void push_prefix_def(
+	Calculator* calc,
+	Prefix* pref,
+	PrintOptions po,
+	std::vector<Definition>& defs
+) {
+	Definition def;
+	def.type = LspKind::ENUM_MB;
+	def.ref_name = pref->referenceName();
+	def.input_name = pref->preferredInputName().name;
+
+	get_all_names(pref, def.all_names);
+
+	std::string disp_name = pref->longName(po.use_unicode_signs);
+	std::string disp_abbr = pref->shortName(po.use_unicode_signs);
+
+	def.documentation = "**" + disp_name + "**";
+	if (!disp_abbr.empty() && disp_abbr != disp_name) {
+		def.documentation += " (" + disp_abbr + ")";
+	}
+
+	std::string type;
+	std::string value;
+
+	switch (pref->type()) {
+		case PREFIX_BINARY: {
+			int exp = static_cast<BinaryPrefix*>(pref)->exponent();
+			value = "2^" + std::to_string(exp);
+			type = "Binary prefix";
+			break;
+		}
+		case PREFIX_DECIMAL: {
+			int exp = static_cast<DecimalPrefix*>(pref)->exponent();
+			value = "10^" + std::to_string(exp);
+			type = "Decimal prefix";
+			break;
+		}
+		default: {
+			value = pref->value().print(po);
+			type = "Prefix";
+			break;
+		}
+	}
+
+	if (!value.empty()) {
+		def.documentation += " = `" + value + "`";
+	}
+	def.documentation += "\n\n**" + type + "**";
+
+	defs.push_back(std::move(def));
+}
 
 bool is_valid_var_name(const std::string& s) {
 	if (s.empty()) return false;
@@ -76,6 +320,8 @@ bool get_canonical_name(const MathStructure& ast, std::string& out) {
 	}
 }
 
+// TODO: when extracting, distinguish between variables and functions
+// (for autocomplete type support)
 void extract_symbols(
 	const MathStructure& ast,
 	std::vector<std::string>& in_syms,

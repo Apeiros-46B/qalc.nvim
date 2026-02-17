@@ -5,6 +5,48 @@ extern "C" {
 #include <lua.h>
 }
 
+namespace strings {
+
+// escape markdown and optionally align newlines
+std::string preprocess_str(const std::string& text, bool align_newlines) {
+	std::string escaped;
+	escaped.reserve(text.length() + text.length() / 10);
+
+	for (char c : text) {
+		switch (c) {
+			case '*':
+			case '_':
+			case '`':
+			case '[':
+			case ']':
+			case '\\':
+			case '~':
+				escaped.push_back('\\');
+				escaped.push_back(c);
+				break;
+			case '<':
+				escaped += "&lt;";
+				break;
+			case '>':
+				escaped += "&gt;";
+				break;
+			case '\n':
+				if (align_newlines) {
+					escaped += "\n  ";
+				} else {
+					escaped.push_back('\n');
+				}
+				break;
+			default:
+				escaped.push_back(c);
+				break;
+		}
+	}
+	return escaped;
+}
+
+}
+
 namespace lua {
 
 StackGuard::StackGuard(lua_State* L, int ret_count = 0):
@@ -19,7 +61,6 @@ StackGuard::~StackGuard() {
 	}
 }
 
-// TODO: make this do nothing in release builds
 void dump_stack(lua_State* L) {
 	int top = lua_gettop(L);
 	std::cout << "--- stack (top: " << top << ") ---\n";
