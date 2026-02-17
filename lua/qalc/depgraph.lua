@@ -5,6 +5,7 @@ M.__index = M
 ---@param bufnr number The buffer this graph is attached to
 function M.new(bufnr)
 	local self = setmetatable({}, M)
+
 	self.bufnr = bufnr
 
 	-- extmark_id -> { out_syms, in_syms }
@@ -13,8 +14,9 @@ function M.new(bufnr)
 	-- symbol -> extmark_id
 	self.extmarks = {}
 
-	-- tracks nodes with cycle errors so when we get a result back from C++ we ignore it
-	self.cycle_errors = {}
+	-- track nodes with errors so when we get a result back from C++ we ignore it
+	self.cycle_errors = {} -- nodes with cycle errors
+	self.duplicate_errors = {} -- nodes that try to redefine existing variables
 
 	return self
 end
@@ -22,13 +24,23 @@ end
 function M:update_node(extmark, out_syms, in_syms)
 	local old = self.nodes[extmark] or { out_syms = {}, in_syms = {} }
 	local deleted_syms = {}
+	local diags = {}
 
-	-- register new outputs
-	-- if `x` is defined lower in the file, it overwrites extmarks[x]
+	-- register new outputs and guard against duplicates
 	local new_outs_set = {}
+	local valid_out_syms = {}
 	for _, sym in ipairs(out_syms) do
-		new_outs_set[sym] = true
-		self.extmarks[sym] = extmark
+		local existing_owner = self.extmarks[sym]
+		if existing_owner and existing_owner ~= extmark then
+			diags[#diags+1] = {
+				message = 'Duplicate definition: "' .. sym .. '" is already defined.',
+				severity = vim.diagnostic.severity.ERROR
+			}
+		else
+			new_outs_set[sym] = true
+			valid_out_syms[#valid_out_syms+1] = sym
+			self.extmarks[sym] = extmark
+		end
 	end
 
 	-- find outputs that no longer exist on this line
@@ -61,18 +73,24 @@ function M:update_node(extmark, out_syms, in_syms)
 		end
 	end
 
-	if #out_syms == 0 and #in_syms == 0 then
+	if #diags > 0 then
+		self.duplicate_errors[extmark] = diags
+	else
+		self.duplicate_errors[extmark] = nil
+	end
+
+	if #valid_out_syms == 0 and #in_syms == 0 then
 		-- garbage collect
 		self.nodes[extmark] = nil
 	else
-		self.nodes[extmark] = { out_syms = out_syms, in_syms = in_syms }
+		self.nodes[extmark] = { out_syms = valid_out_syms, in_syms = in_syms }
 	end
 
-	return deleted_syms, broken_dependents
+	return deleted_syms, broken_dependents, diags
 end
 
-function M:get_cascade(start_extmark, broken_dependents)
-	-- build adjacency list for entire buf
+-- build adjacency list for entire buf
+function M:_build_adj()
 	local adj = {}
 
 	for id in pairs(self.nodes) do
@@ -94,7 +112,93 @@ function M:get_cascade(start_extmark, broken_dependents)
 		end
 	end
 
-	-- BFS to find only the descendants of the start
+	return adj
+end
+
+-- topological sort on a specific subset of nodes (Kahn's algorithm)
+-- returns the sorted cascade array and array of nodes in cycles
+function M:_topo_sort(adj, target_nodes)
+	-- calculate in-degrees for the affected subgraph
+	local sub_in_degree = {}
+
+	for u in pairs(target_nodes) do
+		sub_in_degree[u] = 0
+	end
+	for u in pairs(target_nodes) do
+		for _, v in ipairs(adj[u] or {}) do
+			if target_nodes[v] then
+				sub_in_degree[v] = sub_in_degree[v] + 1
+			end
+		end
+	end
+
+	local zero_in = {}
+
+	for id, deg in pairs(sub_in_degree) do
+		if deg == 0 then
+			zero_in[#zero_in+1] = id
+		end
+	end
+
+	local cascade = {}
+
+	local processed = 0
+	local head = 1
+	while head <= #zero_in do
+		local u = zero_in[head]
+		head = head + 1
+		cascade[#cascade+1] = u
+		processed = processed + 1
+
+		for _, v in ipairs(adj[u] or {}) do
+			if target_nodes[v] then
+				sub_in_degree[v] = sub_in_degree[v] - 1
+				if sub_in_degree[v] == 0 then
+					zero_in[#zero_in+1] = v
+				end
+			end
+		end
+	end
+
+	-- detect cycles
+	local cyclic_nodes = {}
+	local expected_count = 0
+	for _ in pairs(target_nodes) do
+		expected_count = expected_count + 1
+	end
+
+	if processed < expected_count then
+		-- any node with a remaining in-degree > 0 is in a cycle
+		for id in pairs(target_nodes) do
+			if sub_in_degree[id] > 0 then
+				cyclic_nodes[#cyclic_nodes+1] = id
+				-- add to the cascade the callback sees the diagnostic and skips eval
+				cascade[#cascade+1] = id
+			end
+		end
+	end
+
+	return cascade, cyclic_nodes
+end
+
+function M:_process_cycle_errors(cyclic_nodes)
+	local diags = {}
+
+	for _, id in ipairs(cyclic_nodes) do
+		self.cycle_errors[id] = true
+		diags[id] = {{
+			message = 'Reference cycle found, refusing to evaluate',
+			severity = vim.diagnostic.severity.ERROR
+		}}
+	end
+
+	return diags
+end
+
+function M:get_cascade(start_extmark, broken_dependents)
+	local adj = self:_build_adj()
+
+	-- BFS to find only the descendants of the start and broken nodes
 	local affected = { [start_extmark] = true }
 	local visited = { [start_extmark] = true }
 	local queue = { start_extmark }
@@ -121,74 +225,32 @@ function M:get_cascade(start_extmark, broken_dependents)
 		end
 	end
 
-	-- calculate in-degrees for the affected subgraph
-	local sub_in_degree = {}
+	-- topologically sort the affected subgraph
+	local cascade, cyclic_nodes = self:_topo_sort(adj, affected)
 
-	for u in pairs(affected) do
-		sub_in_degree[u] = 0
-	end
-	for u in pairs(affected) do
-		for _, v in ipairs(adj[u] or {}) do
-			if affected[v] then
-				sub_in_degree[v] = sub_in_degree[v] + 1
-			end
-		end
-	end
-
-	-- Kahn's algorithm
 	for id in pairs(affected) do
 		self.cycle_errors[id] = nil
 	end
+	local cycle_diags = self:_process_cycle_errors(cyclic_nodes)
 
-	local zero_in = {}
+	return cascade, cycle_diags
+end
 
-	for id, deg in pairs(sub_in_degree) do
-		if deg == 0 then
-			zero_in[#zero_in+1] = id
-		end
+-- build the graph on initial load
+function M:get_full_sort()
+	local adj = self:_build_adj()
+
+	local target_nodes = {}
+	for id in pairs(self.nodes) do
+		target_nodes[id] = true
 	end
 
-	local cascade = {}
-	local processed = 0
-	head = 1
+	local cascade, cyclic_nodes = self:_topo_sort(adj, target_nodes)
 
-	while head <= #zero_in do
-		local u = zero_in[head]
-		head = head + 1
-		cascade[#cascade+1] = u
-		processed = processed + 1
+	self.cycle_errors = {}
+	local cycle_diags = self:_process_cycle_errors(cyclic_nodes)
 
-		for _, v in ipairs(adj[u] or {}) do
-			if affected[v] then
-				sub_in_degree[v] = sub_in_degree[v] - 1
-				if sub_in_degree[v] == 0 then
-					zero_in[#zero_in+1] = v
-				end
-			end
-		end
-	end
-
-	-- detect cycles
-	local diags = {}
-	local expected_count = 0
-	for _ in pairs(affected) do expected_count = expected_count + 1 end
-
-	if processed < expected_count then
-		-- any node with a remaining in-degree > 0 is in a cycle
-		for id in pairs(affected) do
-			if sub_in_degree[id] > 0 then
-				self.cycle_errors[id] = true
-				diags[id] = {{
-					message = 'Reference cycle found, refusing to evaluate',
-					severity = vim.diagnostic.severity.ERROR
-				}}
-				-- add to the cascade the callback sees the diagnostic and skips eval
-				cascade[#cascade+1] = id
-			end
-		end
-	end
-
-	return cascade, diags
+	return cascade, cycle_diags
 end
 
 return M

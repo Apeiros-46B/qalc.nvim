@@ -85,9 +85,9 @@ void extract_symbols(
 	bool is_top_level
 ) {
 	switch (ast.type()) {
-		// although quoted symbols (like 'x') evaluate to themselves and don't depend on the value
-		// of the underlying variable, sometimes variables are parsed as symbols, so we should
-		// consider them anyways
+		// although quoted symbols (like 'x') evaluate to themselves and don't depend on the
+		// value of the underlying variable, sometimes variables are parsed as symbols, so we
+		// should consider them anyways
 		case STRUCT_SYMBOLIC: {
 			PrintOptions po;
 			po.use_unicode_signs = false;
@@ -186,7 +186,10 @@ void extract_symbols(
 
 							size_t paren_end = sig.find(')');
 							if (paren_end != std::string::npos) {
-								std::string args_str = sig.substr(paren_start + 1, paren_end - paren_start - 1);
+								std::string args_str = sig.substr(
+									paren_start + 1,
+									paren_end - paren_start - 1
+								);
 								std::stringstream ss(args_str);
 								std::string arg;
 								while (std::getline(ss, arg, ',')) {

@@ -1,12 +1,12 @@
 -- handle buffer creation, attach/detach, and job submission
-local ns_track = vim.api.nvim_create_namespace('qalc_track')
 local cfg = require('qalc.config').cfg
 local bridge = require('qalc.bridge')
+local util = require('qalc.util')
 
 local M = {}
 
 -- mapping of bufnr -> depgraph
-local attached_bufs = {}
+M.attached_bufs = {}
 -- mapping of bufnr -> bool, all buffers in this set should be detached from asap
 local detach_queue = {}
 
@@ -16,13 +16,13 @@ local cur_active_buf = nil
 local dirty_bufs = {}
 local flush_scheduled = false
 
-bridge.register_callback(attached_bufs)
+bridge.register_callback(M.attached_bufs)
 
 -- create buffer
 function M.new_buf(name)
 	local cmd = 'enew'
 
-	if name ~= '' and name ~= nil then
+	if name and name ~= '' then
 		cmd = 'e ' .. name
 	elseif cfg.bufname ~= '' then
 		cmd = 'e ' .. cfg.bufname
@@ -40,16 +40,18 @@ function M.queue_detach(bufnr)
 
 	require('qalc.output').clear_all(bufnr)
 end
+
 local function detach(bufnr)
 	detach_queue[bufnr] = nil
-	attached_bufs[bufnr] = nil
+	M.attached_bufs[bufnr] = nil
 	dirty_bufs[bufnr] = nil
 end
 
 -- attach
 function M.is_attached(bufnr)
-	return attached_bufs[bufnr] ~= nil
+	return M.attached_bufs[bufnr] ~= nil
 end
+
 local function flush_dirty_bufs()
 	-- runs when event loop is idle
 	flush_scheduled = false
@@ -59,38 +61,38 @@ local function flush_dirty_bufs()
 			local total_lines = vim.api.nvim_buf_line_count(bufnr)
 
 			local min_lnum = state.min_lnum
-			local max_lnum = math.min(state.max_lnum, total_lines)
+			local max_lnum = math.min(math.max(state.max_lnum, min_lnum + 1), total_lines)
 
 			-- fetch the fully settled text
 			local lines = vim.api.nvim_buf_get_lines(bufnr, min_lnum, max_lnum, false)
 			for i, text in ipairs(lines) do
 				local row = min_lnum + i - 1
 				local marks = vim.api.nvim_buf_get_extmarks(
-					bufnr, ns_track, {row, 0}, {row, -1}, {}
+					bufnr, util.ns_track, {row, 0}, {row, -1}, {}
 				)
 
 				if #marks == 0 then
-					local new_id = vim.api.nvim_buf_set_extmark(bufnr, ns_track, row, 0, {})
+					local new_id = vim.api.nvim_buf_set_extmark(bufnr, util.ns_track, row, 0, {})
 					-- new mark, cannot possibly be a changed state
 					-- therefore we check against whitespace to avoid sending empty jobs to C++
 					if text:match('%S') then
-						bridge.submit(bridge.JobType.PARSE_LINE, bufnr, new_id, text)
+						bridge.submit(util.JobType.PARSE_LINE, bufnr, new_id, text)
 					end
 				else
 					local active_mark = marks[1][1]
-					bridge.submit(bridge.JobType.PARSE_LINE, bufnr, active_mark, text)
+					bridge.submit(util.JobType.PARSE_LINE, bufnr, active_mark, text)
 					for j = 2, #marks do
-						bridge.submit(bridge.JobType.PARSE_LINE, bufnr, marks[j][1], '')
+						bridge.submit(util.JobType.PARSE_LINE, bufnr, marks[j][1], '')
 					end
 				end
 			end
 
 			-- marks have been pushed to EOF, mark them as blank
 			local eof_marks = vim.api.nvim_buf_get_extmarks(
-				bufnr, ns_track, {total_lines, 0}, {-1, -1}, {}
+				bufnr, util.ns_track, {total_lines, 0}, {-1, -1}, {}
 			)
 			for _, mark in ipairs(eof_marks) do
-				bridge.submit(bridge.JobType.PARSE_LINE, bufnr, mark[1], '')
+				bridge.submit(util.JobType.PARSE_LINE, bufnr, mark[1], '')
 			end
 		end
 	end
@@ -106,8 +108,8 @@ local function on_lines(_, bufnr, _, first_lnum, _, new_last_lnum)
 
 	-- accumulate the affected ranges during the edit block
 	local state = dirty_bufs[bufnr] or { min_lnum = first_lnum, max_lnum = new_last_lnum }
-	state.min = math.min(state.min_lnum, first_lnum)
-	state.max = math.max(state.max_lnum, new_last_lnum)
+	state.min_lnum = math.min(state.min_lnum, first_lnum)
+	state.max_lnum = math.max(state.max_lnum, new_last_lnum)
 	dirty_bufs[bufnr] = state
 
 	-- if this is the first edit of the block, schedule the flush
@@ -117,6 +119,41 @@ local function on_lines(_, bufnr, _, first_lnum, _, new_last_lnum)
 	end
 end
 
+-- re-initialize a buffer completely
+function M.hard_reset(bufnr)
+	bufnr = bufnr or vim.api.nvim_get_current_buf()
+	if not M.is_attached(bufnr) then return end
+
+	require('qalc.output').clear_all(bufnr)
+	vim.api.nvim_buf_clear_namespace(bufnr, util.ns_track, 0, -1)
+	bridge.submit(util.JobType.CLEAR_SYMS, bufnr, -1, '')
+
+	local graph = require('qalc.depgraph').new(bufnr)
+	M.attached_bufs[bufnr] = graph
+
+	-- first initialization, we need to mark the graph as initializing so it can
+	-- be properly rebuilt later
+	graph.is_initializing = true
+	graph.pending_parses = 0
+
+	local total_lines = vim.api.nvim_buf_line_count(bufnr)
+	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, total_lines, false)
+
+	for i, text in ipairs(lines) do
+		local id = vim.api.nvim_buf_set_extmark(bufnr, util.ns_track, i - 1, 0, {})
+		if text:gsub(util.comment_pat, ''):match('%S') then
+			graph.pending_parses = graph.pending_parses + 1
+			bridge.submit(util.JobType.PARSE_LINE, bufnr, id, text)
+		end
+	end
+
+	-- edge case, buffer is initially empty
+	if graph.pending_parses == 0 then
+		graph.is_initializing = false
+	end
+end
+
+-- attach qalc to a buffer
 function M.attach(bufnr)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 	if M.is_attached(bufnr) then return true end
@@ -124,14 +161,12 @@ function M.attach(bufnr)
 	detach_queue[bufnr] = nil
 	vim.fn.bufload(bufnr)
 
-	attached_bufs[bufnr] = require('qalc.depgraph').new(bufnr)
-
-	-- manual update on all existing lines (place the initial extmarks)
-	local total_lines = vim.api.nvim_buf_line_count(bufnr)
-	on_lines(nil, bufnr, nil, 0, total_lines, total_lines)
+	M.attached_bufs[bufnr] = require('qalc.depgraph').new(bufnr)
 
 	vim.api.nvim_buf_attach(bufnr, false, { on_lines = on_lines })
 	vim.bo.filetype = 'qalc'
+
+	M.hard_reset(bufnr)
 end
 
 -- update C++-side state in the newly focused buffer
@@ -141,29 +176,13 @@ function M.focus_buffer(bufnr)
 	cur_active_buf = bufnr
 
 	-- wipe local variables from other buffers
-	bridge.submit(bridge.JobType.CLEAR_SYMS, bufnr, -1, '')
+	bridge.submit(util.JobType.CLEAR_SYMS, bufnr, -1, '')
 
-	-- fetch all marks in top-down order (this includes ghosts)
-	local marks = vim.api.nvim_buf_get_extmarks(bufnr, ns_track, 0, -1, {})
-	local seen_lines = {}
+	local graph = M.attached_bufs[bufnr]
+	if not graph or graph.is_initializing then return end
 
-	-- evaluate all lines in order
-	for _, mark in ipairs(marks) do
-		local extmark = mark[1]
-		local lnum = mark[2]
-
-		-- if we haven't seen this line yet, this is the active mark and not a ghost. otherwise,
-		-- it's a ghost and we just ignore it to prevent duplicate eval calls on the same line
-		if not seen_lines[lnum] then
-			seen_lines[lnum] = true
-			local text = vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or ''
-
-			-- direct eval, don't go through the depgraph
-			-- the depgraph state is already maintained properly, the only reason we need to do
-			-- this is to "synchronize" the libqalculate Calculator state with the new buffer
-			bridge.submit(bridge.JobType.EVAL_LINE, bufnr, extmark, text)
-		end
-	end
+	local cascade, cycle_diags = graph:get_full_sort()
+	bridge.dispatch_cascade(bufnr, graph, cascade, cycle_diags)
 end
 
 return M

@@ -1,7 +1,6 @@
 -- display Qalculate output to the user through a decoration provider
-local ns_track = vim.api.nvim_create_namespace('qalc_track')
-local ns_ui = vim.api.nvim_create_namespace('qalc_ui')
 local cfg = require('qalc.config').cfg
+local util = require('qalc.util')
 
 local M = {}
 
@@ -18,7 +17,7 @@ local function flush_diags(bufnr)
 	local all_diags = {}
 	for tracking_mark_id, diags in pairs(diag_cache[bufnr]) do
 		-- find current location of this diagnostic
-		local pos = vim.api.nvim_buf_get_extmark_by_id(bufnr, ns_track, tracking_mark_id, {})
+		local pos = vim.api.nvim_buf_get_extmark_by_id(bufnr, util.ns_track, tracking_mark_id, {})
 
 		if #pos > 0 then
 			local lnum = pos[1]
@@ -35,7 +34,7 @@ local function flush_diags(bufnr)
 		end
 	end
 
-	vim.diagnostic.set(ns_ui, bufnr, all_diags)
+	vim.diagnostic.set(util.ns_ui, bufnr, all_diags)
 end
 
 -- clear one extmark from the cache
@@ -57,7 +56,7 @@ end
 function M.clear_all(bufnr)
 	result_cache[bufnr] = nil
 	diag_cache[bufnr] = nil
-	vim.diagnostic.set(ns_ui, bufnr, {})
+	vim.diagnostic.set(util.ns_ui, bufnr, {})
 	vim.cmd('redraw!')
 end
 
@@ -65,7 +64,7 @@ end
 function M.render(bufnr, tracking_mark, output, diags)
 	result_cache[bufnr] = result_cache[bufnr] or {}
 
-	if output ~= nil and output ~= '' then
+	if output and output ~= '' then
 		result_cache[bufnr][tracking_mark] = output
 	else
 		result_cache[bufnr][tracking_mark] = nil
@@ -88,7 +87,7 @@ function M.yank_result(register)
 	local lnum = vim.api.nvim_win_get_cursor(0)[1] - 1 -- :h api-indexing
 
 	local tracking_marks = vim.api.nvim_buf_get_extmarks(
-		bufnr, ns_track, {lnum, 0}, {lnum, -1}, { limit = 1 }
+		bufnr, util.ns_track, {lnum, 0}, {lnum, -1}, { limit = 1 }
 	)
 	if tracking_marks == nil or #tracking_marks == 0 then
 		vim.notify('qalc: Unable to find extmark on current line')
@@ -108,7 +107,7 @@ function M.yank_result(register)
 end
 
 -- use ephemeral extmarks so we don't have to deal with them getting moved around
-vim.api.nvim_set_decoration_provider(ns_ui, {
+vim.api.nvim_set_decoration_provider(util.ns_ui, {
 	on_win = function(_, _, bufnr, _, _)
 		if not result_cache[bufnr] then
 			return false
@@ -121,7 +120,7 @@ vim.api.nvim_set_decoration_provider(ns_ui, {
 		for lnum = start_lnum, end_lnum - 1 do
 			-- find active tracking mark
 			local tracking_marks = vim.api.nvim_buf_get_extmarks(
-				bufnr, ns_track, {lnum, 0}, {lnum, -1}, { limit = 1 }
+				bufnr, util.ns_track, {lnum, 0}, {lnum, -1}, { limit = 1 }
 			)
 
 			if #tracking_marks > 0 then
@@ -134,7 +133,7 @@ vim.api.nvim_set_decoration_provider(ns_ui, {
 						virt_text[#virt_text+1] = { cfg.display.sign .. ' ', cfg._sign_hl }
 					end
 					virt_text[#virt_text+1] = { text, cfg._result_hl }
-					vim.api.nvim_buf_set_extmark(bufnr, ns_ui, lnum, 0, {
+					vim.api.nvim_buf_set_extmark(bufnr, util.ns_ui, lnum, 0, {
 						ephemeral = true,
 						virt_text = virt_text,
 						virt_text_pos = 'eol',

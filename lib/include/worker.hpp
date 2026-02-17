@@ -40,6 +40,7 @@ enum class JobType: int {
 	CLEAR_SYMS = 2,
 	PARSE_LINE = 3,
 	EVAL_LINE = 4,
+	// GET_DEFS = 5,
 };
 
 struct Diagnostic {
