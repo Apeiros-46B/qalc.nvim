@@ -4,7 +4,7 @@ local util = require('qalc.util')
 
 local M = {}
 
--- bufnr -> tracking_extmark_id -> diags array
+-- bufnr -> tracking_extmark_id -> array[diagnostic]
 local diag_cache = {}
 
 -- bufnr -> tracking_extmark_id -> string

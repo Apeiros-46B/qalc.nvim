@@ -42,7 +42,7 @@ function M.submit(type, bufnr, extmark, payload)
 end
 
 -- dispatch a cascade of evaluations, reporting cycles and duplicates
-function M.dispatch_cascade(bufnr, graph, cascade, cycle_diags, duplicate_diags)
+function M.dispatch_cascade(bufnr, graph, cascade, cycle_diags, dup_diags)
 	local total_lines = vim.api.nvim_buf_line_count(bufnr)
 
 	for _, id in ipairs(cascade) do
@@ -55,8 +55,8 @@ function M.dispatch_cascade(bufnr, graph, cascade, cycle_diags, duplicate_diags)
 					M.submit(util.JobType.DELETE_SYM, bufnr, id, sym)
 				end
 			end
-		elseif duplicate_diags and duplicate_diags[id] then
-			require('qalc.output').render(bufnr, id, '', duplicate_diags[id])
+		elseif dup_diags and dup_diags[id] then
+			require('qalc.output').render(bufnr, id, '', dup_diags[id])
 		else
 			local pos = vim.api.nvim_buf_get_extmark_by_id(bufnr, util.ns_track, id, {})
 			if #pos > 0 then
@@ -90,16 +90,14 @@ function M.register_callback(attached_bufs)
 		local graph = attached_bufs[bufnr]
 
 		if type == util.JobType.EVAL_LINE then
-			if graph and graph.cycle_errors and graph.cycle_errors[extmark] then
+			if graph and graph.had_cycle_error and graph.had_cycle_error[extmark] then
 				return
 			end
 			require('qalc.output').render(bufnr, extmark, output, diags)
 		elseif type == util.JobType.PARSE_LINE then
 			if not graph then return end
 
-			local deleted_syms, broken_dependents, duplicate_diags = graph:update_node(
-				extmark, out_syms, in_syms
-			)
+			local deleted_syms, broken_dependents = graph:update_node(extmark, out_syms, in_syms)
 			for _, sym in ipairs(deleted_syms) do
 				M.submit(util.JobType.DELETE_SYM, bufnr, extmark, sym)
 			end
@@ -112,15 +110,15 @@ function M.register_callback(attached_bufs)
 				if graph.pending_parses == 0 then
 					graph.is_initializing = false
 
-					local full_cascade, cycle_diags = graph:get_full_sort()
-					M.dispatch_cascade(bufnr, graph, full_cascade, cycle_diags, duplicate_diags)
+					local full_cascade, cycle_diags, dup_diags = graph:get_full_sort()
+					M.dispatch_cascade(bufnr, graph, full_cascade, cycle_diags, dup_diags)
 				end
 
 				return
 			end
 
-			local cascade, cycle_diags = graph:get_cascade(extmark, broken_dependents)
-			M.dispatch_cascade(bufnr, graph, cascade, cycle_diags, duplicate_diags)
+			local cascade, cycle_diags, dup_diags = graph:get_cascade(extmark, broken_dependents)
+			M.dispatch_cascade(bufnr, graph, cascade, cycle_diags, dup_diags)
 		end
 	end
 

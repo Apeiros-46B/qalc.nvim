@@ -8,9 +8,11 @@ vim.api.nvim_create_user_command('Qalc',
 	{ nargs = '?' }
 )
 vim.api.nvim_create_user_command('QalcAttach',
-	function(_)
-		require('qalc.buffer').attach()
-	end,
+	function(_) require('qalc.buffer').attach() end,
+	{ nargs = 0 }
+)
+vim.api.nvim_create_user_command('QalcReset',
+	function(_) require('qalc.buffer').hard_reset() end,
 	{ nargs = 0 }
 )
 vim.api.nvim_create_user_command('QalcYank',
@@ -21,6 +23,7 @@ vim.api.nvim_create_user_command('QalcYank',
 	end,
 	{ nargs = '?' }
 )
+-- TODO: QalcAbort command which clears job queue and stops current calculation
 
 local augroup = vim.api.nvim_create_augroup('QalcBufferManagement', { clear = true })
 

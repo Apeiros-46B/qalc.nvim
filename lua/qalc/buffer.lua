@@ -181,8 +181,8 @@ function M.focus_buffer(bufnr)
 	local graph = M.attached_bufs[bufnr]
 	if not graph or graph.is_initializing then return end
 
-	local cascade, cycle_diags = graph:get_full_sort()
-	bridge.dispatch_cascade(bufnr, graph, cascade, cycle_diags)
+	local cascade, cycle_diags, dup_diags = graph:get_full_sort()
+	bridge.dispatch_cascade(bufnr, graph, cascade, cycle_diags, dup_diags)
 end
 
 return M

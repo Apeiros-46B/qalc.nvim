@@ -2,9 +2,10 @@
 
 This branch is not yet ready for use. Before then, I need to finish the following:
 
+- Fixing critical bugs with depgraph (I think there is just one issue, which is the duplicate errors not disappearing when you delete the duplicates)
+- "A builtin unit or symbol was overriden" error is sometimes inconsistent (it only appears the first time). Maybe we just catch this directly in Lua instead of relying on qalc's message
 - Making a cmp completion provider
 - Adding `:QalcAbort` command to stop all queued jobs in case user pastes huge string
-- Adding `:QalcRefresh` command to re-eval the entire buffer and rebuild the extmarks and depgraph in case issues are encountered
 - Writing a CMake package for `libqalculate` so that users don't have to have `pkg-config` installed in order to build the plugin
 - Implementing a way to alter the `PrintOptions` and `EvaluationOptions` (this is normally done with `set` in the `qalc` program, but qalc.nvim now uses the library directly, so this functionality needs to be separately addressed)
 
@@ -53,6 +54,8 @@ The `:Qalc` command optionally accepts one argument; the name of the newly creat
 Alternatively, you can attach to an existing buffer using `:QalcAttach`.
 
 You can yank the result on the current line with `:QalcYank`, which takes an optional register (see `:h setreg()`). The default register can be configured (see below).
+
+If the state of the buffer is somehow broken, you can use `:QalcReset` to force a rebuild of the dependency graph and re-evaluate every line.
 
 All commands accepted in the buffer are `qalc` commands.
 

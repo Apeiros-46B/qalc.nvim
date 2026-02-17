@@ -1,4 +1,8 @@
 -- extmark-based dependency graph
+-- TODO: when duplicate definitions are deleted, sometimes their errors persist
+-- we need to figure out how to reliably clear those errors
+local util = require('qalc.util')
+
 local M = {}
 M.__index = M
 
@@ -15,8 +19,8 @@ function M.new(bufnr)
 	self.extmarks = {}
 
 	-- track nodes with errors so when we get a result back from C++ we ignore it
-	self.cycle_errors = {} -- nodes with cycle errors
-	self.duplicate_errors = {} -- nodes that try to redefine existing variables
+	self.had_cycle_error = {} -- extmark_id -> bool
+	self.duplicate_syms = {} -- extmark_id -> array[string]
 
 	return self
 end
@@ -24,7 +28,7 @@ end
 function M:update_node(extmark, out_syms, in_syms)
 	local old = self.nodes[extmark] or { out_syms = {}, in_syms = {} }
 	local deleted_syms = {}
-	local diags = {}
+	local duplicate_syms = {}
 
 	-- register new outputs and guard against duplicates
 	local new_outs_set = {}
@@ -32,10 +36,7 @@ function M:update_node(extmark, out_syms, in_syms)
 	for _, sym in ipairs(out_syms) do
 		local existing_owner = self.extmarks[sym]
 		if existing_owner and existing_owner ~= extmark then
-			diags[#diags+1] = {
-				message = 'Duplicate definition: "' .. sym .. '" is already defined.',
-				severity = vim.diagnostic.severity.ERROR
-			}
+			duplicate_syms[#duplicate_syms+1] = sym
 		else
 			new_outs_set[sym] = true
 			valid_out_syms[#valid_out_syms+1] = sym
@@ -73,10 +74,10 @@ function M:update_node(extmark, out_syms, in_syms)
 		end
 	end
 
-	if #diags > 0 then
-		self.duplicate_errors[extmark] = diags
+	if #duplicate_syms > 0 then
+		self.duplicate_syms[extmark] = duplicate_syms
 	else
-		self.duplicate_errors[extmark] = nil
+		self.duplicate_syms[extmark] = nil
 	end
 
 	if #valid_out_syms == 0 and #in_syms == 0 then
@@ -86,7 +87,7 @@ function M:update_node(extmark, out_syms, in_syms)
 		self.nodes[extmark] = { out_syms = valid_out_syms, in_syms = in_syms }
 	end
 
-	return deleted_syms, broken_dependents, diags
+	return deleted_syms, broken_dependents
 end
 
 -- build adjacency list for entire buf
@@ -185,7 +186,7 @@ function M:_process_cycle_errors(cyclic_nodes)
 	local diags = {}
 
 	for _, id in ipairs(cyclic_nodes) do
-		self.cycle_errors[id] = true
+		self.had_cycle_error[id] = true
 		diags[id] = {{
 			message = 'Reference cycle found, refusing to evaluate',
 			severity = vim.diagnostic.severity.ERROR
@@ -193,6 +194,26 @@ function M:_process_cycle_errors(cyclic_nodes)
 	end
 
 	return diags
+end
+
+function M:_process_duplicate_errors(target_nodes)
+	local dup_diags = {}
+
+	for id in pairs(target_nodes) do
+		local syms = self.duplicate_syms[id]
+		if syms and #syms > 0 then
+			local diags = {}
+			for _, sym in ipairs(syms) do
+				diags[#diags+1] = {
+					message = 'Duplicate definition: "' .. sym .. '" is already defined.',
+					severity = vim.diagnostic.severity.ERROR
+				}
+			end
+			dup_diags[id] = diags
+		end
+	end
+
+	return dup_diags
 end
 
 function M:get_cascade(start_extmark, broken_dependents)
@@ -229,11 +250,12 @@ function M:get_cascade(start_extmark, broken_dependents)
 	local cascade, cyclic_nodes = self:_topo_sort(adj, affected)
 
 	for id in pairs(affected) do
-		self.cycle_errors[id] = nil
+		self.had_cycle_error[id] = nil
 	end
 	local cycle_diags = self:_process_cycle_errors(cyclic_nodes)
+	local duplicate_diags = self:_process_duplicate_errors(affected)
 
-	return cascade, cycle_diags
+	return cascade, cycle_diags, duplicate_diags
 end
 
 -- build the graph on initial load
@@ -241,16 +263,25 @@ function M:get_full_sort()
 	local adj = self:_build_adj()
 
 	local target_nodes = {}
-	for id in pairs(self.nodes) do
-		target_nodes[id] = true
+	-- base target nodes on tracking marks, not self.nodes, so plain math lines are seen
+	local marks = vim.api.nvim_buf_get_extmarks(
+		self.bufnr,
+		util.ns_track,
+		{0, 0},
+		{-1, -1},
+		{}
+	)
+	for _, mark in ipairs(marks) do
+		target_nodes[mark[1]] = true
 	end
 
 	local cascade, cyclic_nodes = self:_topo_sort(adj, target_nodes)
 
-	self.cycle_errors = {}
+	self.had_cycle_error = {}
 	local cycle_diags = self:_process_cycle_errors(cyclic_nodes)
+	local dup_diags = self:_process_duplicate_errors(target_nodes)
 
-	return cascade, cycle_diags
+	return cascade, cycle_diags, dup_diags
 end
 
 return M
