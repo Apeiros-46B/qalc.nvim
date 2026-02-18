@@ -52,11 +52,6 @@ void Definition::to_lua(lua_State* L, const Definition& self) {
 	lua_setfield(L, -2, "all_names");
 }
 
-const char* Definition::to_lua_kv(lua_State* L, const Definition& self) {
-	Definition::to_lua(L, self);
-	return self.ref_name.c_str();
-}
-
 // similar logic to libqalculate/qalc.cc "bool show_object_into(string name)"
 // TODO: handle subtypes for variables and units, not just functions
 void populate_def(
@@ -329,8 +324,6 @@ bool get_canonical_name(const MathStructure& ast, std::string& out) {
 	}
 }
 
-// TODO: when extracting, distinguish between variables and functions
-// (for autocomplete type support)
 void extract_symbols(
 	const MathStructure& ast,
 	std::vector<std::string>& in_syms,

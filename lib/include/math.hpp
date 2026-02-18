@@ -22,7 +22,6 @@ struct Definition {
 	Definition(LspKind type, std::string ref_name);
 
 	static void to_lua(lua_State* L, const Definition& self);
-	static const char* to_lua_kv(lua_State* L, const Definition& self);
 };
 
 void populate_def(Calculator* calc, Variable* var, PrintOptions po, Definition& def);

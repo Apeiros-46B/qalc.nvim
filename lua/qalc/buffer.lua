@@ -157,6 +157,7 @@ end
 -- attach qalc to a buffer
 function M.attach(bufnr)
 	require('qalc.bridge').register_callback(M.attached_bufs)
+	require('qalc.hover').bind_key(bufnr)
 
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 	if M.is_attached(bufnr) then return true end

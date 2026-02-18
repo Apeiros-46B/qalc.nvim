@@ -394,14 +394,16 @@ void Worker::process_results() {
 			lua_rawgeti(L, LUA_REGISTRYINDEX, callback_ref);
 
 			// push 8 args
-			lua::push(L, static_cast<int>(res.type));
-			lua::push(L, res.bufnr);
-			lua::push(L, res.extmark_id);
-			lua::push(L, res.output);
+			lua::push(L,
+				static_cast<int>(res.type),
+				res.bufnr,
+				res.extmark_id,
+				res.output
+			);
 			lua::make_array<Diagnostic>(L, res.diagnostics, Diagnostic::to_lua);
 			lua::make_array<Definition>(L, res.out_syms, Definition::to_lua);
 			lua::make_array<std::string>(L, res.in_syms);
-			lua::make_table<Definition>(L, res.definitions, Definition::to_lua_kv);
+			lua::make_array<Definition>(L, res.definitions, Definition::to_lua);
 
 			// call
 			if (lua_pcall(L, 8, 0, 0) != LUA_OK) {

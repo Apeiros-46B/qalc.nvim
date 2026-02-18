@@ -47,10 +47,12 @@ function M:_add_completion(def, name, documentation)
 end
 
 function M:complete(request, callback)
+	local bridge = require('qalc.bridge')
+
 	if not self.static_items then
 		self.static_items = {}
 
-		for _, def in pairs(require('qalc.bridge').QALC_BUILTINS or {}) do
+		for _, def in ipairs(bridge.QALC_BUILTINS or {}) do
 			-- share one documentation table across many names
 			local shared_doc = { kind = 'markdown', value = def.documentation }
 			for _, name in ipairs(def.all_names or {}) do
@@ -65,28 +67,18 @@ function M:complete(request, callback)
 		items[i] = self.static_items[i]
 	end
 
-	-- JIT generation of prefix-unit combinations
-	-- this allows us to avoid filling the table with all prefix-unit combinations
-	local input = request.context.cursor_before_line:match('[%a_]+$') or ''
-	if #input > 0 then
-		for _, pref in ipairs(self.raw_prefixes) do
-			if vim.startswith(pref.label, input) or vim.startswith(input, pref.label) then
-				for _, unit in ipairs(self.raw_units) do
-					local combined_label = pref.label .. unit.label
-					if vim.startswith(combined_label, input) then
-						items[#items+1] = {
-							label = combined_label,
-							insertText = combined_label,
-							kind = vim.lsp.protocol.CompletionItemKind.Unit,
-							sortText = 'z_' .. combined_label, -- sort after everything else
-							detail = 'Prefix: ' .. pref.label .. '\n',
-							documentation = unit.documentation,
-						}
-					end
-				end
-			end
-		end
-	end
+	local input = string.match(request.context.cursor_before_line, '[%a_]+$') or ''
+
+	bridge.complete_prefix_unit(input, function(combined, pref_name, _, documentation)
+		items[#items+1] = {
+			label = combined,
+			insertText = combined,
+			kind = vim.lsp.protocol.CompletionItemKind.Unit,
+			sortText = 'z_' .. combined,
+			detail = 'Prefix: ' .. pref_name .. '\n',
+			documentation = { kind = 'markdown', value = documentation },
+		}
+	end)
 
 	-- push locals
 	local bufnr = request.context.bufnr

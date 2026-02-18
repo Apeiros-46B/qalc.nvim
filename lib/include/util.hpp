@@ -116,21 +116,6 @@ inline void make_array(
 	}
 }
 
-// the callable should push one item when called with (lua_State* L, T value)
-// and return a c string key
-template<typename T, typename Collection, typename Callable>
-inline void make_table(
-	lua_State* L,
-	Collection& iter,
-	Callable fn
-) {
-	lua_createtable(L, 0, static_cast<int>(iter.size()));
-	for (T& v : iter) {
-		const char* key = fn(L, v);
-		lua_setfield(L, -2, key);
-	}
-}
-
 template<typename T, typename U, typename... Args>
 void push(lua_State* L, T&& first, U&& second, Args&&... args) {
 	push(L, std::forward<T>(first));

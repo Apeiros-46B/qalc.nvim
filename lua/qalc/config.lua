@@ -44,6 +44,10 @@ M.cfg = {
 			update_in_insert = true,
 			severity_sort = true,
 		},
+
+		-- hover options
+		-- (see `:h vim.lsp.util.open_floating_preview.Opts`)
+		hover = {}
 	},
 
 	integrations = {

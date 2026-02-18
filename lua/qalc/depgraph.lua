@@ -1,6 +1,7 @@
 -- extmark-based dependency graph
 -- TODO: when duplicate definitions are deleted, sometimes their errors persist
 -- we need to figure out how to reliably clear those errors
+-- same for "function" forbidden errors
 local util = require('qalc.util')
 
 local M = {}

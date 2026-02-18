@@ -1,13 +1,21 @@
 -- set up connection with the C++ library
 local util = require('qalc.util')
 
+local callback_registered = false
+
 local M = {}
 
--- ref_name -> { type: LspKind, ref_name, input_name, documentation }
+-- array[{ type: LspKind, ref_name, input_name, documentation }]
 M.QALC_BUILTINS = {}
 
--- array[vimscript cmd]
+-- array[viml_cmd: string]
 M.DYNAMIC_SYNTAX_CMDS = {}
+
+-- ref_name -> { type: LspKind, ref_name, input_name, documentation }
+BUILTIN_LOOKUP = {}
+
+local PREFS = {}
+local UNITS = {}
 
 function M.syntax_highlight()
 	if M.DYNAMIC_SYNTAX_CMDS then
@@ -134,11 +142,16 @@ local function handle_get_defs(attached_bufs, defs)
 
 	-- dynamic syntax highlighting generation
 	local co = coroutine.create(function()
-		local funcs, consts, units, prefs = {}, {}, {}, {}
+		local funcs, consts, units, prefs = {}, {}, UNITS, PREFS
 		local extra_isk = {}
 		local has_extra_isk = false
 
 		local function process_def_name(def, name)
+			if not BUILTIN_LOOKUP[name] then
+				BUILTIN_LOOKUP[name] = {}
+			end
+			BUILTIN_LOOKUP[name][#BUILTIN_LOOKUP[name]+1] = def
+
 			if def.type == util.LspKind.FUNC then
 				funcs[#funcs+1] = name
 			elseif def.type == util.LspKind.CONST then
@@ -160,13 +173,13 @@ local function handle_get_defs(attached_bufs, defs)
 		end
 
 		local count = 0
-		for _, def in pairs(defs) do
+		for _, def in ipairs(defs) do
 			for _, name in ipairs(def.all_names or {}) do
 				process_def_name(def, name)
 			end
 			count = count + 1
 			-- yield every 500 items so we don't hang the UI
-			if count % 500 == 0 then
+			if count % 100 == 0 then
 				coroutine.yield()
 			end
 		end
@@ -185,30 +198,16 @@ local function handle_get_defs(attached_bufs, defs)
 		M.DYNAMIC_SYNTAX_CMDS = { 'syn iskeyword ' .. isk_base }
 		local cmds = M.DYNAMIC_SYNTAX_CMDS
 
-		-- append chunks of syntax commands
-		local function append_chunks(group, items)
-			local chunk = {}
-			for i, item in ipairs(items) do
-				chunk[#chunk+1] = item
-				-- chunk commands into 200 keywords each to avoid sending too many arguments
-				if i % 200 == 0 then
-					cmds[#cmds+1] = 'syn keyword ' .. group .. ' ' .. table.concat(chunk, ' ')
-					chunk = {}
-					coroutine.yield() -- yield after building each chunk string
-				end
-			end
-			if #chunk > 0 then
-				cmds[#cmds+1] = 'syn keyword ' .. group .. ' ' .. table.concat(chunk, ' ')
-			end
-		end
-
-		-- see syntax/qalc.vim
-		append_chunks('qalcFunction', funcs)
-		append_chunks('qalcConstant', consts)
-		append_chunks('qalcUnit', units)
-
-		-- generate a regex for all prefixed units
-		cmds[#cmds+1] = ([[syn match qalcPrefixUnit '\<\(%s\)\(%s\)\>']]):format(
+		-- generate regexes
+		-- \(\<\|\d\@<=\) = start at a word boundary or immediately after a digit
+		-- ("2kg" is matched as 2 being a number and kg being a prefixed unit)
+		cmds[#cmds+1] = ([[syn match qalcFunction '\(\<\|\d\@<=\)\(%s\)\>']]):format(
+			table.concat(funcs, [[\|]])
+		)
+		cmds[#cmds+1] = ([[syn match qalcConstant '\(\<\|\d\@<=\)\(%s\)\>']]):format(
+			table.concat(consts, [[\|]])
+		)
+		cmds[#cmds+1] = ([[syn match qalcUnit '\(\<\|\d\@<=\)\(%s\)\?\(%s\)\>']]):format(
 			table.concat(prefs, [[\|]]),
 			table.concat(units, [[\|]])
 		)
@@ -236,6 +235,11 @@ local function handle_get_defs(attached_bufs, defs)
 end
 
 function M.register_callback(attached_bufs)
+	if callback_registered then
+		return
+	end
+	callback_registered = true
+
 	local lib = require('qalc.lib')
 
 	local function handle_job(
@@ -267,6 +271,59 @@ function M.register_callback(attached_bufs)
 
 	lib.set_callback(vim.schedule_wrap(handle_job))
 	lib.submit_job(util.JobType.GET_DEFS, 0, 0, '')
+end
+
+-- get definitions of a word, which may be a prefix + unit combination
+function M.get_global_defs_for_word(word)
+	if not BUILTIN_LOOKUP then
+		return nil
+	end
+	if BUILTIN_LOOKUP[word] then
+		return BUILTIN_LOOKUP[word]
+	end
+
+	-- decompose word into prefix + unit
+	for _, pref in ipairs(PREFS) do
+		if vim.startswith(word, pref) then
+			local unit_part = word:sub(#pref + 1)
+			local unit_defs = BUILTIN_LOOKUP[unit_part]
+
+			if unit_defs then
+				local pref_defs = BUILTIN_LOOKUP[pref]
+				local combined = {}
+				for _, p in ipairs(pref_defs) do
+					combined[#combined+1] = p
+				end
+				for _, u in ipairs(unit_defs) do
+					combined[#combined+1] = u
+				end
+				return combined
+			end
+		end
+	end
+
+	return nil
+end
+
+-- try to complete the input as a prefix-unit combination
+function M.complete_prefix_unit(input, callback)
+	if not M.QALC_BUILTINS or #input == 0 then
+		return
+	end
+
+	-- glue prefixes and units together to possibly complete the input
+	for _, pref_name in ipairs(PREFS) do
+		if vim.startswith(pref_name, input) or vim.startswith(input, pref_name) then
+			for _, unit_name in ipairs(UNITS) do
+				local combined = pref_name .. unit_name
+				if vim.startswith(combined, input) then
+					local unit_defs = BUILTIN_LOOKUP[unit_name]
+					local doc = unit_defs and unit_defs[1] and unit_defs[1].documentation or ''
+					callback(combined, pref_name, unit_name, doc)
+				end
+			end
+		end
+	end
 end
 
 return M
