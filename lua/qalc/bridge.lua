@@ -64,8 +64,8 @@ function M.dispatch_cascade(bufnr, graph, cascade, cycle_diags, dup_diags)
 
 			local node = graph.nodes[id]
 			if node and node.out_syms then
-				for _, sym in ipairs(node.out_syms) do
-					M.submit(util.JobType.DELETE_SYM, bufnr, id, sym)
+				for _, def in ipairs(node.out_syms) do
+					M.submit(util.JobType.DELETE_SYM, bufnr, id, def.ref_name)
 				end
 			end
 		elseif dup_diags and dup_diags[id] then
@@ -207,10 +207,11 @@ local function handle_get_defs(attached_bufs, defs)
 		append_chunks('qalcConstant', consts)
 		append_chunks('qalcUnit', units)
 
-		-- generate a regex for all prefixes
-		M.DYNAMIC_SYNTAX_CMDS[#M.DYNAMIC_SYNTAX_CMDS+1] = (
-			[[syn match qalcPrefixUnit '\<\(%s\)\k*\>']]
-		):format(table.concat(prefs, [[\|]]))
+		-- generate a regex for all prefixed units
+		cmds[#cmds+1] = ([[syn match qalcPrefixUnit '\<\(%s\)\(%s\)\>']]):format(
+			table.concat(prefs, [[\|]]),
+			table.concat(units, [[\|]])
+		)
 
 		-- retroactively apply new syntax highlighting to any open buffers
 		for bufnr, _ in pairs(attached_bufs) do

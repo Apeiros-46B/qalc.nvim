@@ -399,7 +399,7 @@ void Worker::process_results() {
 			lua::push(L, res.extmark_id);
 			lua::push(L, res.output);
 			lua::make_array<Diagnostic>(L, res.diagnostics, Diagnostic::to_lua);
-			lua::make_array<std::string>(L, res.out_syms);
+			lua::make_array<Definition>(L, res.out_syms, Definition::to_lua);
 			lua::make_array<std::string>(L, res.in_syms);
 			lua::make_table<Definition>(L, res.definitions, Definition::to_lua_kv);
 

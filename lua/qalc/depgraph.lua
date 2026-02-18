@@ -33,19 +33,21 @@ function M:update_node(extmark, out_syms, in_syms)
 	-- register new outputs and guard against duplicates
 	local new_outs_set = {}
 	local valid_out_syms = {}
-	for _, sym in ipairs(out_syms) do
+	for _, def in ipairs(out_syms) do
+		local sym = def.ref_name
 		local existing_owner = self.extmarks[sym]
 		if existing_owner and existing_owner ~= extmark then
 			duplicate_syms[#duplicate_syms+1] = sym
 		else
 			new_outs_set[sym] = true
-			valid_out_syms[#valid_out_syms+1] = sym
+			valid_out_syms[#valid_out_syms+1] = def
 			self.extmarks[sym] = extmark
 		end
 	end
 
 	-- find outputs that no longer exist on this line
-	for _, sym in ipairs(old.out_syms) do
+	for _, def in ipairs(old.out_syms) do
+		local sym = def.ref_name
 		if not new_outs_set[sym] then
 			-- only clear the symbol->extmark entry if this line was the one providing it
 			if self.extmarks[sym] == extmark then
@@ -285,8 +287,10 @@ function M:get_full_sort()
 end
 
 function M:for_all_symbols(fn)
-	for sym, _ in pairs(self.extmarks) do
-		fn(sym)
+	for _, node in pairs(self.nodes) do
+		for _, def in pairs(node.out_syms) do
+			fn(def)
+		end
 	end
 end
 

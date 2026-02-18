@@ -92,13 +92,13 @@ function M:complete(request, callback)
 	local bufnr = request.context.bufnr
 	local graph = require('qalc.buffer').attached_bufs[bufnr]
 	if graph then
-		graph:for_all_symbols(function(sym)
+		graph:for_all_symbols(function(def)
 			items[#items+1] = {
-				label = sym,
-				insertText = sym,
-				kind = vim.lsp.protocol.CompletionItemKind.Variable,
+				label = def.ref_name,
+				insertText = def.ref_name,
+				kind = def.type,
 				detail = 'Local symbol',
-				sortText = '0_' .. sym,
+				sortText = '0_' .. def.ref_name,
 			}
 		end)
 	end

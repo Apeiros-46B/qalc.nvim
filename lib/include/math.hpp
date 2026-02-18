@@ -18,6 +18,10 @@ struct Definition {
 	std::string documentation; // fully formatted markdown string
 	std::vector<std::string> all_names;
 
+	Definition();
+	Definition(LspKind type, std::string ref_name);
+
+	static void to_lua(lua_State* L, const Definition& self);
 	static const char* to_lua_kv(lua_State* L, const Definition& self);
 };
 
@@ -111,7 +115,7 @@ bool get_canonical_name(const MathStructure& ast, std::string& out);
 void extract_symbols(
 	const MathStructure& ast,
 	std::vector<std::string>& in_syms,
-	std::vector<std::string>& out_syms,
+	std::vector<Definition>& out_syms,
 
 	// temporary state for recursion
 	const std::vector<std::string>& local_vars = {},

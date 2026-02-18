@@ -78,7 +78,7 @@ struct JobResult {
 	std::vector<Diagnostic> diagnostics;
 
 	// empty unless type is PARSE_LINE
-	std::vector<std::string> out_syms;
+	std::vector<Definition> out_syms;
 	std::vector<std::string> in_syms;
 
 	// empty unless type is GET_DEFS

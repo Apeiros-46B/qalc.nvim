@@ -34,7 +34,13 @@ extern "C" {
 #include "math.hpp"
 #include "util.hpp"
 
-const char* Definition::to_lua_kv(lua_State* L, const Definition& self) {
+Definition::Definition() {}
+
+Definition::Definition(LspKind type, std::string ref_name):
+	type{type}, ref_name{ref_name}, input_name{ref_name}, documentation{""}
+{}
+
+void Definition::to_lua(lua_State* L, const Definition& self) {
 	lua_createtable(L, 0, 5);
 
 	lua::push_and_set(L, static_cast<int>(self.type), "type");
@@ -44,7 +50,10 @@ const char* Definition::to_lua_kv(lua_State* L, const Definition& self) {
 
 	lua::make_array<std::string>(L, self.all_names);
 	lua_setfield(L, -2, "all_names");
+}
 
+const char* Definition::to_lua_kv(lua_State* L, const Definition& self) {
+	Definition::to_lua(L, self);
 	return self.ref_name.c_str();
 }
 
@@ -325,7 +334,7 @@ bool get_canonical_name(const MathStructure& ast, std::string& out) {
 void extract_symbols(
 	const MathStructure& ast,
 	std::vector<std::string>& in_syms,
-	std::vector<std::string>& out_syms,
+	std::vector<Definition>& out_syms,
 
 	const std::vector<std::string>& local_vars,
 	bool is_top_level
@@ -382,7 +391,7 @@ void extract_symbols(
 
 			// since we disable implicit multiplication, we don't need to reconstruct symbols
 			if (is_valid_var_name(lhs_str)) {
-				out_syms.push_back(lhs_str);
+				out_syms.push_back({LspKind::VAR, lhs_str});
 				extract_symbols(*rhs, in_syms, out_syms, local_vars, false);
 				return;
 			}
@@ -405,7 +414,7 @@ void extract_symbols(
 					if (!lhs->isSymbolic() && get_canonical_name(*lhs, canonical_target)) {
 						canonical_target = clean_symbol_name(canonical_target, true);
 						if (is_valid_var_name(canonical_target)) {
-							out_syms.push_back(canonical_target);
+							out_syms.push_back({LspKind::VAR, canonical_target});
 						}
 					} else {
 						// no canonical name; it's a function signature
@@ -417,7 +426,7 @@ void extract_symbols(
 						if (paren_start == std::string::npos) {
 							// no parentheses, plain variable assignment like x := 1
 							if (is_valid_var_name(sig)) {
-								out_syms.push_back(sig);
+								out_syms.push_back({LspKind::VAR, sig});
 							}
 						} else {
 							std::string f_name = sig.substr(0, paren_start);
@@ -427,7 +436,7 @@ void extract_symbols(
 							);
 
 							if (is_valid_var_name(f_name)) {
-								out_syms.push_back(f_name);
+								out_syms.push_back({LspKind::FUNC, f_name});
 							}
 
 							size_t paren_end = sig.find(')');
