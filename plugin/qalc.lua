@@ -45,8 +45,8 @@ vim.api.nvim_create_autocmd('BufEnter', {
 	group = augroup,
 	pattern = '*',
 	callback = function(args)
-		local buffer = require('qalc.buffer')
 		vim.schedule(function()
+			local buffer = require('qalc.buffer')
 			if buffer.is_attached(args.buf) then
 				buffer.focus_buffer(args.buf)
 			end

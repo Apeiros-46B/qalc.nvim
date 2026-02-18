@@ -11,9 +11,7 @@ function M.show(bufnr)
 	-- remove leading numbers so 2kg -> kg
 	local word = raw_word:gsub('^[%d%.]+', '')
 
-	if word == '' then
-		return
-	end
+	if word == '' then return end
 
 	local lines = {}
 

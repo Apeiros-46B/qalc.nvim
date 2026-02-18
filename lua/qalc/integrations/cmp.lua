@@ -1,5 +1,4 @@
 -- cmp integration
--- TODO: I think this has a little more room for optimization
 local util = require('qalc.util')
 
 local M = {}
@@ -73,7 +72,7 @@ function M:complete(request, callback)
 		items[#items+1] = {
 			label = combined,
 			insertText = combined,
-			kind = vim.lsp.protocol.CompletionItemKind.Unit,
+			kind = util.LspKind.UNIT,
 			sortText = 'z_' .. combined,
 			detail = 'Prefix: ' .. pref_name .. '\n',
 			documentation = { kind = 'markdown', value = documentation },
@@ -82,9 +81,9 @@ function M:complete(request, callback)
 
 	-- push locals
 	local bufnr = request.context.bufnr
-	local graph = require('qalc.buffer').attached_bufs[bufnr]
+	local graph = require('qalc.buffer').get_graph(bufnr)
 	if graph then
-		graph:for_all_symbols(function(def)
+		for def in graph:definitions() do
 			items[#items+1] = {
 				label = def.ref_name,
 				insertText = def.ref_name,
@@ -92,7 +91,7 @@ function M:complete(request, callback)
 				detail = 'Local symbol',
 				sortText = '0_' .. def.ref_name,
 			}
-		end)
+		end
 	end
 
 	callback(items)

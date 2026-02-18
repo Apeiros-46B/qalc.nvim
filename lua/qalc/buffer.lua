@@ -188,7 +188,11 @@ function M.focus_buffer(bufnr)
 	if not graph or graph.is_initializing then return end
 
 	local cascade, cycle_diags, dup_diags = graph:get_full_sort()
-	bridge.dispatch_cascade(bufnr, graph, cascade, cycle_diags, dup_diags)
+	require('qalc.dispatch').run_cascade(bufnr, graph, cascade, cycle_diags, dup_diags)
+end
+
+function M.get_graph(bufnr)
+	return M.attached_bufs[bufnr]
 end
 
 return M

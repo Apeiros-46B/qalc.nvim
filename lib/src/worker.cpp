@@ -172,7 +172,7 @@ Worker::~Worker() {
 // main thread
 void Worker::init_async(uv_loop_t* loop) {
 	async_handle = new uv_async_t();
-	uv_async_init(loop, async_handle, Worker::callback);
+	uv_async_init(loop, async_handle, &Worker::callback);
 	async_handle->data = this;
 }
 
@@ -260,7 +260,7 @@ static void parse_line(Calculator* calc, Job& job, JobResult& result) {
 	MathStructure ast;
 	calc->parse(&ast, job.payload, job.get_parse_options());
 	get_diagnostics(calc, result);
-	extract_symbols(ast, result.in_syms, result.out_syms);
+	extract_symbols(ast, result.in_syms, result.out_syms, true, job.payload);
 }
 
 // worker thread
@@ -278,7 +278,7 @@ static void eval_line(Calculator* calc, Job& job, JobResult& result) {
 	// MathStructure ast;
 	// calc->parse(&ast, job.payload, job.get_parse_options());
 	// get_diagnostics(calc, result);
-	// extract_symbols(ast, result.in_syms, result.out_syms);
+	// extract_symbols(ast, result.in_syms, result.out_syms, true, job.payload);
 	// result.output = dump_ast(ast);
 }
 

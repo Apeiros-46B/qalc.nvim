@@ -1,7 +1,4 @@
 -- extmark-based dependency graph
--- TODO: when duplicate definitions are deleted, sometimes their errors persist
--- we need to figure out how to reliably clear those errors
--- same for "function" forbidden errors
 local util = require('qalc.util')
 
 local M = {}
@@ -34,9 +31,11 @@ function M:update_node(extmark, out_syms, in_syms)
 	-- register new outputs and guard against duplicates
 	local new_outs_set = {}
 	local valid_out_syms = {}
+
 	for _, def in ipairs(out_syms) do
 		local sym = def.ref_name
 		local existing_owner = self.extmarks[sym]
+
 		if existing_owner and existing_owner ~= extmark then
 			duplicate_syms[#duplicate_syms+1] = sym
 		else
@@ -46,9 +45,21 @@ function M:update_node(extmark, out_syms, in_syms)
 		end
 	end
 
+	-- prevent self-reference "x = x + 1"
+	local clean_in_syms = {}
+
+	if in_syms then
+		for _, sym in ipairs(in_syms) do
+			if not new_outs_set[sym] then
+				clean_in_syms[#clean_in_syms+1] = sym
+			end
+		end
+	end
+
 	-- find outputs that no longer exist on this line
 	for _, def in ipairs(old.out_syms) do
 		local sym = def.ref_name
+
 		if not new_outs_set[sym] then
 			-- only clear the symbol->extmark entry if this line was the one providing it
 			if self.extmarks[sym] == extmark then
@@ -60,15 +71,18 @@ function M:update_node(extmark, out_syms, in_syms)
 
 	-- find nodes whose dependencies were just deleted
 	local broken_dependents = {}
+
 	if #deleted_syms > 0 then
-		local del_set = {}
+		local deleted_syms_set = {}
+
 		for _, s in ipairs(deleted_syms) do
-			del_set[s] = true
+			deleted_syms_set[s] = true
 		end
+
 		for id, node in pairs(self.nodes) do
 			if id ~= extmark then
 				for _, in_sym in ipairs(node.in_syms) do
-					if del_set[in_sym] then
+					if deleted_syms_set[in_sym] then
 						broken_dependents[#broken_dependents+1] = id
 						break
 					end
@@ -84,10 +98,9 @@ function M:update_node(extmark, out_syms, in_syms)
 	end
 
 	if #valid_out_syms == 0 and #in_syms == 0 then
-		-- garbage collect
 		self.nodes[extmark] = nil
 	else
-		self.nodes[extmark] = { out_syms = valid_out_syms, in_syms = in_syms }
+		self.nodes[extmark] = { out_syms = valid_out_syms, in_syms = clean_in_syms }
 	end
 
 	return deleted_syms, broken_dependents
@@ -287,12 +300,17 @@ function M:get_full_sort()
 	return cascade, cycle_diags, dup_diags
 end
 
-function M:for_all_symbols(fn)
-	for _, node in pairs(self.nodes) do
-		for _, def in pairs(node.out_syms) do
-			fn(def)
+-- for def in graph:definitions() do ... end
+function M:definitions()
+	return coroutine.wrap(function()
+		for _, node in pairs(self.nodes) do
+			if node.out_syms then
+				for _, def in ipairs(node.out_syms) do
+					coroutine.yield(def)
+				end
+			end
 		end
-	end
+	end)
 end
 
 return M

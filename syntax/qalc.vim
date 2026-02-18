@@ -29,6 +29,6 @@ hi def link qalcLiteral    Number
 hi def link qalcConstant   Constant
 hi def link qalcFunction   Function
 hi def link qalcUnit       Type
-hi def link qalcUnknown    TSField
+hi def link qalcUnknown    Identifier
 hi def link qalcOperator   Operator
 hi def link qalcComment    Comment

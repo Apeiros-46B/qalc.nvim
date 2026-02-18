@@ -21,12 +21,17 @@ local function flush_diags(bufnr)
 
 		if #pos > 0 then
 			local lnum = pos[1]
-			for _, d in ipairs(diags) do
-				local diag_copy = vim.deepcopy(d)
-				diag_copy.bufnr = bufnr
-				diag_copy.lnum = lnum
-				diag_copy.col = 0
-				all_diags[#all_diags+1] = diag_copy
+			local seen_msgs = {}
+
+			for _, diag in ipairs(diags) do
+				if not seen_msgs[diag.message] then
+					seen_msgs[diag.message] = true
+					local diag_copy = vim.deepcopy(diag)
+					diag_copy.bufnr = bufnr
+					diag_copy.lnum = lnum
+					diag_copy.col = 0
+					all_diags[#all_diags+1] = diag_copy
+				end
 			end
 		else
 			-- extmark was deleted by user
@@ -38,9 +43,14 @@ local function flush_diags(bufnr)
 end
 
 -- clear one extmark from the cache
-function M.clear(bufnr, tracking_mark)
+-- if show_placeholder is true, show a placeholder until the mark is updated again
+function M.clear(bufnr, tracking_mark, show_placeholder, no_redraw)
 	if result_cache[bufnr] then
-		result_cache[bufnr][tracking_mark] = nil
+		if show_placeholder and cfg.display.placeholder then
+			result_cache[bufnr][tracking_mark] = cfg.display.placeholder
+		else
+			result_cache[bufnr][tracking_mark] = nil
+		end
 	end
 
 	if diag_cache[bufnr] and diag_cache[bufnr][tracking_mark] then
@@ -48,8 +58,10 @@ function M.clear(bufnr, tracking_mark)
 		flush_diags(bufnr)
 	end
 
-	-- force repaint, which erases ephemeral text (see decoration provider below)
-	vim.cmd('redraw!')
+	if not no_redraw then
+		-- force repaint, which erases ephemeral text (see decoration provider below)
+		vim.cmd('redraw!')
+	end
 end
 
 -- clear all extmarks
@@ -64,7 +76,34 @@ end
 function M.render(bufnr, tracking_mark, output, diags)
 	result_cache[bufnr] = result_cache[bufnr] or {}
 
+	local should_show = false
+
+	-- check output against input to avoid redundant outputs like "x = 5 = 5"
 	if output and output ~= '' then
+		should_show = true
+
+		local pos = vim.api.nvim_buf_get_extmark_by_id(bufnr, util.ns_track, tracking_mark, {})
+		if #pos > 0 then
+			local lnum = pos[1]
+			local lines = vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)
+
+			if #lines > 0 then
+				local line = lines[1]
+				-- escape special chars for lua pattern matching
+				local escaped_out = output:gsub('([^%w])', '%%%1')
+
+				if line:gsub('%s+', '') == output:gsub('%s+', '') then
+					-- constant "5 = 5"
+					should_show = false
+				elseif line:match('=%s*' .. escaped_out .. '%s*$') then
+					-- assignment "x = 5 = 5"
+					should_show = false
+				end
+			end
+		end
+	end
+
+	if should_show then
 		result_cache[bufnr][tracking_mark] = output
 	else
 		result_cache[bufnr][tracking_mark] = nil
@@ -144,5 +183,25 @@ vim.api.nvim_set_decoration_provider(util.ns_ui, {
 		end
 	end
 })
+
+-- batch update placeholders when evaluation starts
+util.connect_signal('eval_started', function(bufnr, ids)
+	for _, id in ipairs(ids) do
+		-- show_placeholder = true
+		-- no_redraw = true
+		M.clear(bufnr, id, true, true)
+	end
+	vim.cmd('redraw!')
+end)
+
+util.connect_signal('eval_done', M.render)
+
+-- in case of ghost, clear the output and stale diagnostics
+-- this is safe and will never drop the result for the active mark
+util.connect_signal('result_cleared', M.clear)
+
+util.connect_signal('diags_ready', function(bufnr, extmark, diags)
+	M.render(bufnr, extmark, '', diags)
+end)
 
 return M

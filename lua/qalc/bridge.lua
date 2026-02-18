@@ -1,4 +1,4 @@
--- set up connection with the C++ library
+-- set up connection with the C++ library and handle querying of definitions
 local util = require('qalc.util')
 
 local callback_registered = false
@@ -8,14 +8,14 @@ local M = {}
 -- array[{ type: LspKind, ref_name, input_name, documentation }]
 M.QALC_BUILTINS = {}
 
--- array[viml_cmd: string]
+-- array[string]
 M.DYNAMIC_SYNTAX_CMDS = {}
 
 -- ref_name -> { type: LspKind, ref_name, input_name, documentation }
-BUILTIN_LOOKUP = {}
+local BUILTIN_LOOKUP = {}
 
-local PREFS = {}
-local UNITS = {}
+local PREFS = {} -- array[string]
+local UNITS = {} -- array[string]
 
 function M.syntax_highlight()
 	if M.DYNAMIC_SYNTAX_CMDS then
@@ -26,8 +26,6 @@ function M.syntax_highlight()
 end
 
 function M.submit(type, bufnr, extmark, payload)
-	local output = require('qalc.output')
-
 	-- strip comments
 	if (type == util.JobType.EVAL_LINE or type == util.JobType.PARSE_LINE) then
 		payload = payload:gsub(util.comment_pat, '')
@@ -39,15 +37,14 @@ function M.submit(type, bufnr, extmark, payload)
 
 	if type == util.JobType.EVAL_LINE then
 		if is_forbidden then
-			local diags = {{
+			util.emit_signal('diags_ready', bufnr, extmark, {{
 				message = 'Legacy "function" syntax disabled. Use f(x) := ...',
-				severity = vim.diagnostic.severity.ERROR
-			}}
-			output.render(bufnr, extmark, '', diags)
+				severity = vim.diagnostic.severity.ERROR,
+			}})
 			return
 		elseif is_blank then
 			-- clear stale results for blank lines
-			output.clear(bufnr, extmark)
+			util.emit_signal('result_cleared', bufnr, extmark)
 			return
 		end
 	elseif type == util.JobType.PARSE_LINE then
@@ -60,81 +57,6 @@ function M.submit(type, bufnr, extmark, payload)
 	end
 
 	require('qalc.lib').submit_job(type, bufnr, extmark, payload)
-end
-
--- dispatch a cascade of evaluations, reporting cycles and duplicates
-function M.dispatch_cascade(bufnr, graph, cascade, cycle_diags, dup_diags)
-	local total_lines = vim.api.nvim_buf_line_count(bufnr)
-
-	for _, id in ipairs(cascade) do
-		if cycle_diags and cycle_diags[id] then
-			require('qalc.output').render(bufnr, id, '', cycle_diags[id])
-
-			local node = graph.nodes[id]
-			if node and node.out_syms then
-				for _, def in ipairs(node.out_syms) do
-					M.submit(util.JobType.DELETE_SYM, bufnr, id, def.ref_name)
-				end
-			end
-		elseif dup_diags and dup_diags[id] then
-			require('qalc.output').render(bufnr, id, '', dup_diags[id])
-		else
-			local pos = vim.api.nvim_buf_get_extmark_by_id(bufnr, util.ns_track, id, {})
-			if #pos > 0 then
-				local lnum = pos[1]
-				if lnum < total_lines then
-					local line_marks = vim.api.nvim_buf_get_extmarks(
-						bufnr, util.ns_track, {lnum, 0}, {lnum, -1}, { limit = 1 }
-					)
-
-					if #line_marks > 0 and line_marks[1][1] == id then
-						-- active mark, safe to evaluate
-						M.submit(
-							util.JobType.EVAL_LINE,
-							bufnr,
-							id,
-							vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1] or ''
-						)
-					end
-					-- in case of ghost, do nothing
-				end
-			end
-		end
-	end
-end
-
-local function handle_eval(graph, bufnr, extmark, output, diags)
-	if graph and graph.had_cycle_error and graph.had_cycle_error[extmark] then
-		return
-	end
-	require('qalc.output').render(bufnr, extmark, output, diags)
-end
-
-local function handle_parse(graph, bufnr, extmark, out_syms, in_syms)
-	if not graph then return end
-
-	local deleted_syms, broken_dependents = graph:update_node(extmark, out_syms, in_syms)
-	for _, sym in ipairs(deleted_syms) do
-		M.submit(util.JobType.DELETE_SYM, bufnr, extmark, sym)
-	end
-
-	-- initial graph setup. we can't evaluate lines sequentially since variables might
-	-- be defined lower in the file than they're used (the sheet is free-form like excel)
-	if graph.is_initializing then
-		graph.pending_parses = graph.pending_parses - 1
-
-		if graph.pending_parses == 0 then
-			graph.is_initializing = false
-
-			local full_cascade, cycle_diags, dup_diags = graph:get_full_sort()
-			M.dispatch_cascade(bufnr, graph, full_cascade, cycle_diags, dup_diags)
-		end
-
-		return
-	end
-
-	local cascade, cycle_diags, dup_diags = graph:get_cascade(extmark, broken_dependents)
-	M.dispatch_cascade(bufnr, graph, cascade, cycle_diags, dup_diags)
 end
 
 local function handle_get_defs(attached_bufs, defs)
@@ -235,9 +157,7 @@ local function handle_get_defs(attached_bufs, defs)
 end
 
 function M.register_callback(attached_bufs)
-	if callback_registered then
-		return
-	end
+	if callback_registered then return end
 	callback_registered = true
 
 	local lib = require('qalc.lib')
@@ -256,9 +176,9 @@ function M.register_callback(attached_bufs)
 		if not vim.api.nvim_buf_is_valid(bufnr) then return end
 
 		if type == util.JobType.EVAL_LINE then
-			handle_eval(attached_bufs[bufnr], bufnr, extmark, output, diags)
+			util.emit_signal('eval_done', bufnr, extmark, output, diags)
 		elseif type == util.JobType.PARSE_LINE then
-			handle_parse(attached_bufs[bufnr], bufnr, extmark, out_syms, in_syms)
+			util.emit_signal('parse_done', bufnr, extmark, out_syms, in_syms)
 		elseif type == util.JobType.GET_DEFS then
 			handle_get_defs(attached_bufs, defs)
 		end
@@ -307,9 +227,7 @@ end
 
 -- try to complete the input as a prefix-unit combination
 function M.complete_prefix_unit(input, callback)
-	if not M.QALC_BUILTINS or #input == 0 then
-		return
-	end
+	if not M.QALC_BUILTINS or #input == 0 then return end
 
 	-- glue prefixes and units together to possibly complete the input
 	for _, pref_name in ipairs(PREFS) do

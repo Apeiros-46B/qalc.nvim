@@ -117,8 +117,9 @@ void extract_symbols(
 	std::vector<Definition>& out_syms,
 
 	// temporary state for recursion
-	const std::vector<std::string>& local_vars = {},
-	bool is_top_level = true
+	bool is_top_level = true,
+	const std::string& payload = "",
+	const std::vector<std::string>& local_vars = {}
 );
 
 // debug: print the type of a structure

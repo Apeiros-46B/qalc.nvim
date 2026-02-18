@@ -20,6 +20,9 @@ M.cfg = {
 		-- sign shown before result (false to disable)
 		sign = '=', -- string or false
 
+		-- placeholder shown while result is evaluating (false to disable)
+		placeholder = '...', -- string or false
+
 		-- whether or not to right align virtual text
 		right_align = false, -- boolean
 

@@ -324,13 +324,78 @@ bool get_canonical_name(const MathStructure& ast, std::string& out) {
 	}
 }
 
+#define SKIP_WHILE(i, s, pred) while (i < s.length() && pred(s[i])) i++;
+
+// check if string starts with "VAR =" (ignore ==, !=, <=, etc)
+static std::string get_assignment_target(const std::string& s) {
+	if (s.empty()) {
+		return "";
+	}
+
+	size_t i = 0;
+	SKIP_WHILE(i, s, isspace);
+	if (i >= s.length()) {
+		return "";
+	}
+
+	// don't start identifiers with digits
+	if (isdigit(s[i])) {
+		return "";
+	}
+
+	// don't start with an equals sign if it stands alone, but unicode like "µ" is valid
+	// safe bet: check for '='
+	if (s[i] == '=') {
+		return "";
+	}
+
+	// capture identifier
+	size_t start = i;
+	while (i < s.length() && !isspace(s[i]) && s[i] != '=') {
+		// standard operators might split tokens but for "var =", usually it looks like
+		// "var =" or "var=". if it's "a+b=", that is a comparison, not assignment
+		char c = s[i];
+		if (c == '+' || c == '-' || c == '*' || c == '/' ||
+			c == '^' || c == '!' || c == '<' || c == '>') {
+			return "";
+		}
+		i++;
+	}
+
+	if (i == start) {
+		return "";
+	}
+	std::string var_name = s.substr(start, i - start);
+
+	SKIP_WHILE(i, s, isspace);
+
+	if (i < s.length() && s[i] == '=') {
+		// don't match '=='
+		if (i + 1 < s.length() && s[i+1] == '=') {
+			return "";
+		}
+
+		// check prev char, make sure it isn't <, >, !, ~
+		if (i > 0) {
+			char prev = s[i-1];
+			if (prev == '<' || prev == '>' || prev == '!' || prev == '~') {
+				return "";
+			}
+		}
+
+		return var_name;
+	}
+	return "";
+}
+
 void extract_symbols(
 	const MathStructure& ast,
 	std::vector<std::string>& in_syms,
 	std::vector<Definition>& out_syms,
 
-	const std::vector<std::string>& local_vars,
-	bool is_top_level
+	bool is_top_level,
+	const std::string& payload,
+	const std::vector<std::string>& local_vars
 ) {
 	switch (ast.type()) {
 		// although quoted symbols (like 'x') evaluate to themselves and don't depend on the
@@ -372,12 +437,12 @@ void extract_symbols(
 		case STRUCT_COMPARISON: {
 			if (!is_top_level) break;
 			if (ast.comparisonType() != ComparisonType::COMPARISON_EQUALS) break;
-			if (ast.countChildren() < 2) break;
+			if (ast.countChildren() < 1) break;
 
 			// getChild is one-indexed for some strange reason
 			const MathStructure* lhs = ast.getChild(1);
 			const MathStructure* rhs = ast.getChild(2);
-			if (lhs == nullptr || rhs == nullptr) break;
+			if (lhs == nullptr) break;
 
 			std::string lhs_str;
 			if (!get_canonical_name(*lhs, lhs_str)) break;
@@ -385,7 +450,9 @@ void extract_symbols(
 			// since we disable implicit multiplication, we don't need to reconstruct symbols
 			if (is_valid_var_name(lhs_str)) {
 				out_syms.push_back({LspKind::VAR, lhs_str});
-				extract_symbols(*rhs, in_syms, out_syms, local_vars, false);
+				if (rhs != nullptr) {
+					extract_symbols(*rhs, in_syms, out_syms, false, "", local_vars);
+				}
 				return;
 			}
 			break;
@@ -449,7 +516,7 @@ void extract_symbols(
 							}
 						}
 					}
-					extract_symbols(*rhs, in_syms, out_syms, new_locals, false);
+					extract_symbols(*rhs, in_syms, out_syms, false, "", new_locals);
 					return;
 				} else {
 					// normal function call (e.g., sin(x) or myfunc(5))
@@ -469,7 +536,27 @@ void extract_symbols(
 	// fallback for others
 	for (size_t i = 1; i <= ast.countChildren(); ++i) {
 		if (const MathStructure* child = ast.getChild(i)) {
-			extract_symbols(*child, in_syms, out_syms, local_vars, false);
+			extract_symbols(*child, in_syms, out_syms, false, "", local_vars);
+		}
+	}
+
+	// promote inputs to outputs in incomplete equality-assignments "a ="
+	if (is_top_level && out_syms.empty() && !payload.empty()) {
+		std::string target = get_assignment_target(payload);
+
+		if (!target.empty()) {
+			auto it = std::find_if(
+				in_syms.begin(),
+				in_syms.end(),
+				[&](const std::string& sym) { return sym == target; }
+			);
+			if (it != in_syms.end()) {
+				out_syms.push_back({LspKind::VAR, *it});
+				in_syms.erase(it);
+			} else {
+				// it wasn't in the in_syms
+				out_syms.push_back({LspKind::VAR, target});
+			}
 		}
 	}
 }

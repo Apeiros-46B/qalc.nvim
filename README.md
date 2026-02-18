@@ -1,15 +1,12 @@
-# NOTE
+> [!IMPORTANT]
+> This branch is not ready for use. There are still a few issues that need to be addressed before it is merged to main.
 
-This branch is not yet ready for use. Before then, I need to finish the following:
+# TODO
 
-- Don't show virtual text when input = output (trivial numeric constants)
-- Make it possible to disable definition scraping to lower memory usage
-- Fix critical bugs with depgraph (I think there is just one issue, which is the duplicate errors not disappearing when you delete the duplicates)
-- "A builtin unit or symbol was overriden" error is sometimes inconsistent (it only appears the first time). Maybe we just catch this directly in Lua instead of relying on qalc's message
-- Add `:QalcAbort` command to stop all queued jobs in case user pastes huge string or accidentally starts long calculation
-- Add "temporary eval" mode in a prompt like the `=` register. Can also integrate with visual mode to evaluate the selected expression
-- Write a CMake package for `libqalculate` so that users don't have to have `pkg-config` installed in order to build the plugin
-- Implement a way to alter the `PrintOptions` and `EvaluationOptions` (this is normally done with `set` in the `qalc` program, but qalc.nvim now uses the library directly, so this functionality needs to be separately addressed)
+- Improve documentation scraping for units and variables (see show_object_info function in qalc source code)
+- Implement a way to alter `ParseOptions`, `PrintOptions`, and `EvaluationOptions` (this is normally done with `set` in the `qalc` program, but qalc.nvim now uses the library directly, so this functionality needs to be separately addressed)
+- Fix `:QalcAbort` command (it stops the current calculation, but for some reason doesn't clear the job queue)
+- Write CMake files for dependencies so that users don't have to have `pkg-config` installed in order to build the plugin
 
 # qalc.nvim
 
@@ -24,7 +21,7 @@ A Neovim plugin for reactive spreadsheet-like calculations with unit conversions
 - For supported functions, constants, units, etc, see [the `libqalculate` README](github.com/Qalculate/libqalculate#examples-expressions)
 - Syntax highlighting
 - Plotting (use `plot(f(x))` function)
-- Warnings and errors from expressions are shown as LSP diagnostics
+- Warnings and errors from expressions are shown as diagnostics
 - [`nvim-cmp`](https://github.com/hrsh7th/nvim-cmp) integration for autocomplete of functions, constants, variables, and units
 
 ## Installation
