@@ -3,7 +3,6 @@
 
 # TODO
 
-- Improve documentation scraping for units and variables (see show_object_info function in qalc source code)
 - Implement a way to alter `ParseOptions`, `PrintOptions`, and `EvaluationOptions` (this is normally done with `set` in the `qalc` program, but qalc.nvim now uses the library directly, so this functionality needs to be separately addressed)
 - Fix `:QalcAbort` command (it stops the current calculation, but for some reason doesn't clear the job queue)
 - Write CMake files for dependencies so that users don't have to have `pkg-config` installed in order to build the plugin

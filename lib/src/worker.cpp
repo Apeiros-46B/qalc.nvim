@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <mutex>
 #include <queue>
 #include <thread>
@@ -117,6 +118,15 @@ Worker::Worker(lua_State* L): L{L} {
 	CALCULATOR = calc;
 	calc->loadExchangeRates();
 	calc->loadGlobalDefinitions();
+
+	// SECURITY: remove "command" function
+	// risk of RCE since it allows qalc files to execute arbitrary shell commands
+	for (auto* func : calc->functions) {
+		if (func && func->name() == "command") {
+			func->destroy();
+			break;
+		}
+	}
 
 	// async remains uninitialized!
 	// these MUST be called before submitting any jobs:

@@ -13,8 +13,11 @@
 // nested := assignments seem to be fine though; `a := b := 1` assigns 1 to both
 // `a` and `b` as expected, and the algorithm treats both `a` and `b` as output
 
+// FIX: save() to define functions with implicit parameters probably doesn't work
+
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <string>
 #include <sstream>
 #include <vector>
@@ -53,33 +56,107 @@ void Definition::to_lua(lua_State* L, const Definition& self) {
 }
 
 // similar logic to libqalculate/qalc.cc "bool show_object_into(string name)"
-// TODO: handle subtypes for variables and units, not just functions
 void populate_def(
 	Calculator* calc,
 	Variable* var,
 	PrintOptions po,
 	Definition& def
 ) {
-	def.type = var->isKnown() ? LspKind::CONST : LspKind::VAR;
+	std::string val;
 
-	std::string val = calc->print(var, 100, po);
+	if (var->isKnown()) {
+		def.type = LspKind::CONST;
+		val = calc->print(static_cast<KnownVariable*>(var)->get(), 100, po);
+	} else {
+		def.type = LspKind::VAR;
+		def.documentation += ": Unknown Variable";
+		val = calc->print(var, 100, po);
+	}
+
 	if (!val.empty()) {
 		def.documentation += " = `" + val + "`";
 	}
 }
+
+static std::string split_composite(CompositeUnit* unit, PrintOptions po) {
+	return unit->print(po, true, TAG_TYPE_TERMINAL, false, false);
+}
+
 void populate_def(
 	Calculator* calc,
 	Unit* unit,
 	PrintOptions po,
 	Definition& def
 ) {
+
 	def.type = LspKind::UNIT;
 
-	std::string val = calc->print(unit, 100, po);
-	if (!val.empty()) {
-		def.documentation += " = `" + val + "`";
+	switch (unit->subtype()) {
+		case SUBTYPE_BASE_UNIT: {
+			def.documentation += " (Base unit)";
+			break;
+		}
+		case SUBTYPE_ALIAS_UNIT: {
+			AliasUnit* alias = static_cast<AliasUnit*>(unit);
+			def.documentation += " -> `";
+
+			// only show the scale factor if it's not 1
+			std::string relation = calc->localizeExpression(alias->expression() );
+			if (relation != "1") {
+				def.documentation += relation + " ";
+			}
+
+			Unit* base = alias->firstBaseUnit();
+			std::string base_name;
+			if (base->subtype() == SUBTYPE_COMPOSITE_UNIT) {
+				if (relation == "1") {
+					// unscaled alias pointing to a composite (N -> kg m/s^2)
+					// we should split it
+					base_name = split_composite(static_cast<CompositeUnit*>(base), po);
+				} else {
+					// scaled alias (hp -> 745.69 W)
+					base_name = base->preferredDisplayName(
+						po.abbreviate_names,
+						po.use_unicode_signs
+					).name;
+				}
+			} else {
+				// alias pointing to another type of unit
+				base_name = base->print(po);
+			}
+			def.documentation += base_name + "`";
+
+			if (!alias->inverseExpression().empty()) {
+				def.documentation += "\n\n**Inverse relation**: `" + base_name + " -> ";
+				def.documentation += calc->localizeExpression(alias->inverseExpression()).c_str();
+				def.documentation += " " + alias->print(po) + "`";
+			}
+
+			bool is_relative = false;
+			if (!alias->uncertainty(&is_relative).empty()) {
+				std::string uncertainty = calc->localizeExpression(alias->uncertainty());
+				def.documentation += "\n\n**Uncertainty:** `" + uncertainty + "`";
+				if (is_relative) {
+					def.documentation += " (relative)";
+				}
+			}
+
+			break;
+		}
+		case SUBTYPE_COMPOSITE_UNIT: {
+			CompositeUnit* composite = static_cast<CompositeUnit*>(unit);
+			def.documentation += " = `" + split_composite(composite, po) + "`";
+			break;
+		}
+		default: {
+			std::string val = calc->print(unit, 100, po);
+			if (!val.empty()) {
+				def.documentation += " = `" + val + "`";
+			}
+		}
 	}
 }
+
 void populate_def(
 	Calculator* calc,
 	MathFunction* func,
@@ -96,13 +173,13 @@ void populate_def(
 		);
 	}
 
-	std::string sig = "\n\n**Signature:** `" + def.input_name + "(";
+	std::string sig = "\n\n**Signature**: `" + def.input_name + "(";
 	std::string arg_list;
 
 	if (args_count == 0) {
 		sig += ")`";
 	} else {
-		arg_list = "\n\n**Arguments:**\n";
+		arg_list = "\n\n**Arguments**:\n";
 
 		for (int i = 1; i <= args_count; ++i) {
 			Argument* arg = func->getArgumentDefinition(i);
@@ -165,7 +242,7 @@ void populate_def(
 	// dataset handling (e.g. `atom()`)
 	if (func->subtype() == SUBTYPE_DATA_SET) {
 		DataSet* set = static_cast<DataSet*>(func);
-		def.documentation += "\n\n**Properties:**\n";
+		def.documentation += "\n\n**Properties**:\n";
 
 		DataPropertyIter it;
 		DataProperty* prop = set->getFirstProperty(&it);
@@ -217,7 +294,7 @@ void populate_def(
 		}
 
 		if (!expr_str.empty()) {
-			def.documentation += "\n\n**Expression:** `" + expr_str + "`";
+			def.documentation += "\n\n**Expression**: `" + expr_str + "`";
 		}
 	}
 }
