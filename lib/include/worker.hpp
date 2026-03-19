@@ -102,6 +102,7 @@ private:
 
 	std::thread worker_thread;
 	std::atomic<bool> running{false};
+	std::atomic<bool> aborted{false};
 
 	std::queue<Job> input;
 	std::queue<JobResult> output;
@@ -113,7 +114,7 @@ private:
 
 	void main_loop();
 	void process_results();
-	void purge_eval_queue(const std::string& msg);
+	void purge_eval_queue();
 
 	static void callback(uv_async_t* handle);
 

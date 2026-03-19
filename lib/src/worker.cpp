@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <mutex>
 #include <queue>
 #include <thread>
@@ -21,6 +20,8 @@ extern "C" {
 namespace worker {
 
 static Worker* worker = nullptr;
+
+constexpr const char* ABORT_MSG = "Calculation was manually aborted.";
 
 void Diagnostic::to_lua(lua_State* L, const Diagnostic& self) {
 	lua_createtable(L, 0, 2);
@@ -133,7 +134,7 @@ Worker::Worker(lua_State* L): L{L} {
 	// - init_async
 	// - set_callback
 
-	running = true;
+	running.store(true);
 	worker_thread = std::thread(&Worker::main_loop, this);
 }
 
@@ -161,7 +162,7 @@ EvaluationOptions Job::get_eval_options() {
 Worker::~Worker() {
 	{
 		std::lock_guard<std::mutex> lock(queue_mutex);
-		running = false;
+		running.store(false);
 	}
 	cv.notify_all();
 	if (worker_thread.joinable()) {
@@ -198,8 +199,9 @@ void Worker::set_callback(int ref) {
 // main thread
 void Worker::submit_job(Job&& job) {
 	if (job.type == JobType::ABORT) {
+		aborted.store(true);
 		calc->abort();
-		purge_eval_queue("Calculation was manually aborted.");
+		purge_eval_queue();
 		uv_async_send(async_handle);
 		return;
 	}
@@ -333,6 +335,11 @@ void Worker::main_loop() {
 		result.bufnr = job.bufnr;
 		result.extmark_id = job.extmark_id;
 
+		// user made a new edit or switched buffers, clear abort flag
+		if (job.type == JobType::PARSE_LINE || job.type == JobType::CLEAR_SYMS) {
+			aborted.store(false);
+		}
+
 		try {
 			switch (job.type) {
 				// delete and clear don't need to notify lua, they merely mutate the calculator
@@ -351,13 +358,17 @@ void Worker::main_loop() {
 					break;
 				}
 				case JobType::EVAL_LINE: {
+					if (aborted.load()) {
+						result.output = "";
+						result.diagnostics.push_back({Severity::ERROR, ABORT_MSG});
+						break;
+					}
+
 					eval_line(calc, job, result);
+
 					if (calc->aborted()) {
-						result.diagnostics.push_back({
-							Severity::ERROR,
-							"Calculation timed out or was aborted."
-						});
-						purge_eval_queue("Upstream dependency timed out or was aborted.");
+						result.diagnostics.push_back({Severity::ERROR, ABORT_MSG});
+						purge_eval_queue();
 					}
 					break;
 				}
@@ -425,7 +436,7 @@ void Worker::process_results() {
 }
 
 // main thread or worker thread
-void Worker::purge_eval_queue(const std::string& msg) {
+void Worker::purge_eval_queue() {
 	std::lock_guard<std::mutex> lock(queue_mutex);
 	std::queue<Job> kept_jobs;
 
@@ -441,7 +452,7 @@ void Worker::purge_eval_queue(const std::string& msg) {
 			result.bufnr = pending.bufnr;
 			result.extmark_id = pending.extmark_id;
 			result.output = "";
-			result.diagnostics.push_back({Severity::ERROR, msg});
+			result.diagnostics.push_back({Severity::ERROR, ABORT_MSG});
 
 			output.push(std::move(result));
 		} else {

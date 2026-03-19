@@ -4,7 +4,6 @@
 # TODO
 
 - Implement a way to alter `ParseOptions`, `PrintOptions`, and `EvaluationOptions` (this is normally done with `set` in the `qalc` program, but qalc.nvim now uses the library directly, so this functionality needs to be separately addressed)
-- Fix `:QalcAbort` command (it stops the current calculation, but for some reason doesn't clear the job queue)
 - Write CMake files for dependencies so that users don't have to have `pkg-config` installed in order to build the plugin
 
 # qalc.nvim
@@ -73,7 +72,7 @@ Alternatively, you can attach to an existing buffer using `:QalcAttach`.
 
 You can yank the result on the current line with `:QalcYank`, which takes an optional register (see `:h setreg()`). The default register can be configured (see below).
 
-If the state of the buffer is somehow broken, you can use `:QalcReset` to force a rebuild of the dependency graph and re-evaluate every line.
+If the state of the buffer is somehow broken, you can use `:QalcReset` to force a rebuild of the dependency graph and re-evaluate every line. If you accidentally started a very long-running calculation, you can use `:QalcAbort` to forcibly terminate it.
 
 With the exception of interactive session commands (like `set`, `delete`, `info` etc), all lines are evaluated like `qalc` commands.
 
