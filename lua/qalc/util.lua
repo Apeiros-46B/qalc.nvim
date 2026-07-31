@@ -9,7 +9,6 @@ M.JobType = {
 	PARSE_LINE = 3,
 	EVAL_LINE = 4,
 	GET_DEFS = 5,
-	ABORT = 6,
 }
 
 M.LspKind = {

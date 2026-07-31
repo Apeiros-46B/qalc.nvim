@@ -21,7 +21,7 @@ namespace worker {
 
 static Worker* worker = nullptr;
 
-constexpr const char* ABORT_MSG = "Calculation was manually aborted.";
+constexpr const char* TIMEOUT_MSG = "Calculation timed out.";
 
 void Diagnostic::to_lua(lua_State* L, const Diagnostic& self) {
 	lua_createtable(L, 0, 2);
@@ -198,14 +198,6 @@ void Worker::set_callback(int ref) {
 
 // main thread
 void Worker::submit_job(Job&& job) {
-	if (job.type == JobType::ABORT) {
-		aborted.store(true);
-		calc->abort();
-		purge_eval_queue();
-		uv_async_send(async_handle);
-		return;
-	}
-
 	{
 		std::lock_guard<std::mutex> lock(queue_mutex);
 		input.push(std::move(job));
@@ -335,11 +327,6 @@ void Worker::main_loop() {
 		result.bufnr = job.bufnr;
 		result.extmark_id = job.extmark_id;
 
-		// user made a new edit or switched buffers, clear abort flag
-		if (job.type == JobType::PARSE_LINE || job.type == JobType::CLEAR_SYMS) {
-			aborted.store(false);
-		}
-
 		try {
 			switch (job.type) {
 				// delete and clear don't need to notify lua, they merely mutate the calculator
@@ -358,16 +345,10 @@ void Worker::main_loop() {
 					break;
 				}
 				case JobType::EVAL_LINE: {
-					if (aborted.load()) {
-						result.output = "";
-						result.diagnostics.push_back({Severity::ERROR, ABORT_MSG});
-						break;
-					}
-
 					eval_line(calc, job, result);
 
 					if (calc->aborted()) {
-						result.diagnostics.push_back({Severity::ERROR, ABORT_MSG});
+						result.diagnostics.push_back({Severity::ERROR, TIMEOUT_MSG});
 						purge_eval_queue();
 					}
 					break;
@@ -377,8 +358,6 @@ void Worker::main_loop() {
 					break;
 				}
 
-				// unreachable
-				case JobType::ABORT: break;
 			}
 		} catch (const std::exception& e) {
 			result.output = "";
@@ -452,7 +431,7 @@ void Worker::purge_eval_queue() {
 			result.bufnr = pending.bufnr;
 			result.extmark_id = pending.extmark_id;
 			result.output = "";
-			result.diagnostics.push_back({Severity::ERROR, ABORT_MSG});
+			result.diagnostics.push_back({Severity::ERROR, TIMEOUT_MSG});
 
 			output.push(std::move(result));
 		} else {

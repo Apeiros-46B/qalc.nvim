@@ -72,7 +72,7 @@ Alternatively, you can attach to an existing buffer using `:QalcAttach`.
 
 You can yank the result on the current line with `:QalcYank`, which takes an optional register (see `:h setreg()`). The default register can be configured (see below).
 
-If the state of the buffer is somehow broken, you can use `:QalcReset` to force a rebuild of the dependency graph and re-evaluate every line. If you accidentally started a very long-running calculation, you can use `:QalcAbort` to forcibly terminate it.
+If the state of the buffer is somehow broken, you can use `:QalcReset` to force a rebuild of the dependency graph and re-evaluate every line.
 
 With the exception of interactive session commands (like `set`, `delete`, `info` etc), all lines are evaluated like `qalc` commands.
 

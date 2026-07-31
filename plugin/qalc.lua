@@ -15,13 +15,6 @@ vim.api.nvim_create_user_command('QalcReset',
 	function(_) require('qalc.buffer').hard_reset() end,
 	{ nargs = 0 }
 )
-vim.api.nvim_create_user_command('QalcAbort',
-	function(_) require('qalc.bridge').submit(
-		require('qalc.util').JobType.ABORT,
-		0, 0, ''
-	) end,
-	{ nargs = 0 }
-)
 vim.api.nvim_create_user_command('QalcYank',
 	function(cmd)
 		require('qalc.output').yank_result(

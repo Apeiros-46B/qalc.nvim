@@ -36,7 +36,6 @@ enum class JobType: int {
 	PARSE_LINE = 3,
 	EVAL_LINE = 4,
 	GET_DEFS = 5,
-	ABORT = 6,
 };
 
 struct Diagnostic {
@@ -65,7 +64,7 @@ struct Job {
 };
 
 struct JobResult {
-	// can never be DELETE_SYM, CLEAR_SYMS, or ABORT, they return no results
+	// can never be DELETE_SYM or CLEAR_SYMS, they return no results
 	JobType type;
 	int bufnr;
 	int extmark_id;
@@ -102,7 +101,6 @@ private:
 
 	std::thread worker_thread;
 	std::atomic<bool> running{false};
-	std::atomic<bool> aborted{false};
 
 	std::queue<Job> input;
 	std::queue<JobResult> output;
