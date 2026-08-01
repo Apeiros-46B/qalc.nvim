@@ -1,10 +1,17 @@
-vim.system({
+local function run(cmd)
+	local result = vim.system(cmd):wait()
+	if result.code ~= 0 then
+		error(result.stderr or result.stdout or 'build command failed')
+	end
+end
+
+run({
 	'cmake',
 	'-DCMAKE_BUILD_TYPE=Release',
 	'-S', './lib',
 	'-B', './lib/build'
-}):wait()
-vim.system({ 'cmake', '--build', './lib/build' }):wait()
+})
+run({ 'cmake', '--build', './lib/build' })
 
 -- not sure which extension is used, so we just make symlinks for all of them
 -- TODO: replace this with `cmake --install`

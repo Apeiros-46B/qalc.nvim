@@ -375,7 +375,7 @@ std::string clean_symbol_name(std::string s, bool strip_escapes) {
 			}
 		}
 		// handle backslash escape (e.g., \x -> x)
-		if (s.front() == '\\') {
+		if (!s.empty() && s.front() == '\\') {
 			s = s.substr(1);
 		}
 	}

@@ -53,12 +53,6 @@ M.cfg = {
 		hover = {}
 	},
 
-	integrations = {
-		cmp = {
-			enable = true, -- whether to enable cmp integration
-		},
-	},
-
 	_sign_hl = 'QalcSign',
 	_result_hl = 'QalcResult',
 }
@@ -70,10 +64,10 @@ end
 
 local function deep_extend_inplace(dest, src)
 	for k, v in pairs(src) do
-		if type(v) ~= 'table' then
-			dest[k] = v
-		else
+		if type(v) == 'table' and type(dest[k]) == 'table' then
 			deep_extend_inplace(dest[k], v)
+		else
+			dest[k] = type(v) == 'table' and vim.deepcopy(v) or v
 		end
 	end
 end
@@ -81,8 +75,8 @@ end
 function M.setup(new_cfg)
 	deep_extend_inplace(M.cfg, new_cfg)
 	rehighlight()
-	if M.cfg.diagnostics ~= false then
-		vim.diagnostic.config(M.cfg.diagnostics, ns_ui)
+	if M.cfg.display.diagnostics ~= false then
+		vim.diagnostic.config(M.cfg.display.diagnostics, ns_ui)
 	end
 end
 

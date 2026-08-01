@@ -5,6 +5,7 @@
 
 - Implement a way to alter `ParseOptions`, `PrintOptions`, and `EvaluationOptions` (this is normally done with `set` in the `qalc` program, but qalc.nvim now uses the library directly, so this functionality needs to be separately addressed)
 - Write CMake files for dependencies so that users don't have to have `pkg-config` installed in order to build the plugin
+- `display.right_align` and `display.multiline_style`
 
 # qalc.nvim
 
@@ -78,9 +79,29 @@ With the exception of interactive session commands (like `set`, `delete`, `info`
 
 ## Potentially unexpected behaviours
 
-- 1:1 feature parity with `qalc` CLI frontend is a non-goal. Calling `qalc` as a subprocess is slow and prone to bugs, and perfectly emulating its behaviour using the C++ library is almost impossible [due to how complex their frontend is](https://github.com/Qalculate/libqalculate/blob/master/src/qalc.cc). Notable features that will not be supported are interactive commands (like `set` and `delete`), `ans` variables, and the legacy `function` syntax (use `f(x) := ...` instead).
-- If you constantly switch between multiple huge qalc buffers, you may experience some lag. This is due to a technical limitation of `libqalculate` (the `Calculator` is a stateful singleton), so the plugin has to clear the state and re-evaluate the entire buffer when you switch to it.
-- The buffer does not evaluate top-down like code; defined variables can referenced anywhere (akin to a 1D spreadsheet with named values).
+- The buffer does not evaluate top-down like code; defined variables can
+  referenced anywhere (akin to a 1D spreadsheet with named values).
+- Dependency tracking treats functions and variables as if they were in one
+  namespace even though libqalculate treats them as separate, so don't give a
+  function and a variable the same name.
+- 1:1 feature parity with `qalc` CLI frontend is a non-goal. Calling `qalc` as
+  a subprocess (which was what this plugin used to do) is slow and prone to
+  bugs, and perfectly emulating its behaviour using the C++ library is almost
+  impossible [due to how complex their frontend
+  is](https://github.com/Qalculate/libqalculate/blob/master/src/qalc.cc).
+  Notable features that will not be supported are interactive commands (like
+  `set` and `delete`), `ans` variables, and the legacy `function` syntax (use
+  `f(x) := ...` instead).
+- If you have multiple large qalc buffers, you may experience some lag when
+  switching between them. This is due to a technical limitation of
+  `libqalculate` that I unfortunately can't really do anything about. (The
+  `Calculator` struct is a stateful singleton and instantiating more than one
+  leads to a double free, so the plugin has to clear the state and re-evaluate
+  the entire buffer when you switch to it. I tried juggling multiple
+  `Calculator` structs and swapping out the global singleton pointer (which is
+  cleaned up by the destructor) to avoid double frees, but it seems like the
+  state is global anyways and not encapsulated within the struct itself, making
+  multiple instances useless.)
 
 ## Configuration
 

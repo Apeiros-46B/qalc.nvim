@@ -383,7 +383,7 @@ void Worker::process_results() {
 	}
 
 	while (!ready_results.empty()) {
-		JobResult res = ready_results.front();
+		JobResult res = std::move(ready_results.front());
 		ready_results.pop();
 
 		// at the end of the scope, shrink the stack back to where it is now

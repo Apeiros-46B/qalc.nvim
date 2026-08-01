@@ -7,6 +7,4 @@ return {
 	setup   = config.setup,
 	new_buf = buffer.new_buf,
 	attach  = buffer.attach,
-	detach  = buffer.detach,
-	yank    = buffer.yank,
 }

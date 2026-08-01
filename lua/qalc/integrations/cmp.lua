@@ -7,7 +7,8 @@ M.__index = M
 function M.new()
 	local self = setmetatable({}, M)
 
-	self.static_items = nil
+	self.builtins = nil
+	self.static_items = {}
 
 	-- for JIT prefix-unit completion
 	self.raw_units = {}
@@ -48,10 +49,13 @@ end
 function M:complete(request, callback)
 	local bridge = require('qalc.bridge')
 
-	if not self.static_items then
+	if self.builtins ~= bridge.QALC_BUILTINS then
+		self.builtins = bridge.QALC_BUILTINS
 		self.static_items = {}
+		self.raw_units = {}
+		self.raw_prefixes = {}
 
-		for _, def in ipairs(bridge.QALC_BUILTINS or {}) do
+		for _, def in ipairs(self.builtins or {}) do
 			-- share one documentation table across many names
 			local shared_doc = { kind = 'markdown', value = def.documentation }
 			for _, name in ipairs(def.all_names or {}) do

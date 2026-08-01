@@ -68,8 +68,11 @@ end
 function M.clear_all(bufnr)
 	result_cache[bufnr] = nil
 	diag_cache[bufnr] = nil
-	vim.diagnostic.set(util.ns_ui, bufnr, {})
-	vim.cmd('redraw!')
+
+	if vim.api.nvim_buf_is_valid(bufnr) then
+		vim.diagnostic.set(util.ns_ui, bufnr, {})
+		vim.cmd('redraw!')
+	end
 end
 
 -- update the cache for one extmark

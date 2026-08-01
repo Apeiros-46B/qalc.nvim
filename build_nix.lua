@@ -1,4 +1,7 @@
-vim.system({ 'bash', '-c', 'cd lib && nix build' }):wait()
+local result = vim.system({ 'nix', 'build' }, { cwd = 'lib' }):wait()
+if result.code ~= 0 then
+	error(result.stderr or result.stdout or 'build command failed')
+end
 
 -- not sure which extension is used, so we just make symlinks for all of them
 local exts = { 'dll', 'dylib', 'so' }

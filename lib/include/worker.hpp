@@ -97,7 +97,7 @@ public:
 private:
 	lua_State* L = nullptr;
 	int callback_ref = LUA_NOREF;
-	uv_async_t* async_handle;
+	uv_async_t* async_handle = nullptr;
 
 	std::thread worker_thread;
 	std::atomic<bool> running{false};

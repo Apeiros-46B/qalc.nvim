@@ -123,15 +123,23 @@ local function handle_get_defs(attached_bufs, defs)
 		-- generate regexes
 		-- \(\<\|\d\@<=\) = start at a word boundary or immediately after a digit
 		-- ("2kg" is matched as 2 being a number and kg being a prefixed unit)
+		local function join_regex_names(names)
+			local escaped = {}
+			for i, name in ipairs(names) do
+				escaped[i] = vim.fn.escape(name, '\\.*$^~[]')
+			end
+			return table.concat(escaped, [[\|]])
+		end
+
 		cmds[#cmds+1] = ([[syn match qalcFunction '\(\<\|\d\@<=\)\(%s\)\>']]):format(
-			table.concat(funcs, [[\|]])
+			join_regex_names(funcs)
 		)
 		cmds[#cmds+1] = ([[syn match qalcConstant '\(\<\|\d\@<=\)\(%s\)\>']]):format(
-			table.concat(consts, [[\|]])
+			join_regex_names(consts)
 		)
 		cmds[#cmds+1] = ([[syn match qalcUnit '\(\<\|\d\@<=\)\(%s\)\?\(%s\)\>']]):format(
-			table.concat(prefs, [[\|]]),
-			table.concat(units, [[\|]])
+			join_regex_names(prefs),
+			join_regex_names(units)
 		)
 
 		-- retroactively apply new syntax highlighting to any open buffers

@@ -17,9 +17,11 @@ vim.api.nvim_create_user_command('QalcReset',
 )
 vim.api.nvim_create_user_command('QalcYank',
 	function(cmd)
-		require('qalc.output').yank_result(
-			cmd.args or require('qalc.config').cfg.yank_default_register or ''
-		)
+		local register = cmd.args
+		if register == '' then
+			register = require('qalc.config').cfg.yank_default_register or ''
+		end
+		require('qalc.output').yank_result(register)
 	end,
 	{ nargs = '?' }
 )

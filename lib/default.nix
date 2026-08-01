@@ -14,6 +14,7 @@ stdenv.mkDerivation {
 	buildInputs = with pkgs; [
 		luajit
 		libqalculate
+		libuv
 	];
 	installPhase = "install -Dm755 *.so -t $out/lib/";
 	# postFixup = ''
