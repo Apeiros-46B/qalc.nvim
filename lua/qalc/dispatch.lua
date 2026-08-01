@@ -77,33 +77,4 @@ util.guard_signal('eval_done', function(bufnr, extmark, _, _)
 	return true
 end)
 
-util.connect_signal('parse_done', function(bufnr, extmark, out_syms, in_syms)
-	local graph = require('qalc.buffer').get_graph(bufnr)
-	if not graph then return end
-
-	local deleted_syms, broken_dependents = graph:update_node(extmark, out_syms, in_syms)
-
-	for _, sym in ipairs(deleted_syms) do
-		require('qalc.bridge').submit(util.JobType.DELETE_SYM, bufnr, extmark, sym)
-	end
-
-	-- initial graph setup. we can't evaluate lines sequentially since variables might
-	-- be defined lower in the file than they're used (the sheet is free-form like excel)
-	if graph.is_initializing then
-		graph.pending_parses = graph.pending_parses - 1
-
-		if graph.pending_parses == 0 then
-			graph.is_initializing = false
-
-			local full_cascade, cycle_diags, dup_diags = graph:get_full_sort()
-			M.run_cascade(bufnr, graph, full_cascade, cycle_diags, dup_diags)
-		end
-
-		return
-	end
-
-	local cascade, cycle_diags, dup_diags = graph:get_cascade(extmark, broken_dependents)
-	M.run_cascade(bufnr, graph, cascade, cycle_diags, dup_diags)
-end)
-
 return M
