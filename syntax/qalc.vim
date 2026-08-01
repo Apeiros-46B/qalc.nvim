@@ -10,7 +10,7 @@ syn match   qalcName     '\k\+'
 syn match   qalcFunction '\k\+\ze\s*('
 " TODO: enumerate known vs unknown variables from backend
 syn match   qalcUnknown  /'[^']*'\|"[^"]*"\|\\\a\|[knpqrwxyzXYZ]*\(\a\@!\)/
-syn match   qalcOperator '[+\-*/^%!&|<>=]\|\<to\>\|:='
+syn match   qalcOperator '[+\-*/^%!&|<>=]\|\<to\>\|\<where\>\|:='
 syn match   qalcComment  '#.*$'
 syn match   qalcLiteral  '-\?\d\+\(\.\d\+\)\?\(e-\?\d\+\)\?' " decimal
 syn match   qalcLiteral  '-\?0x\x\+\(\.\x\+\)\?\(p-\?\d\+\)\?' " hexadecimal

@@ -178,7 +178,8 @@ function M.register_callback(attached_bufs)
 		diags,
 		out_syms,
 		in_syms,
-		defs
+		defs,
+		norm_expr
 	)
 		-- buffer might have been closed while C++ was working
 		if not vim.api.nvim_buf_is_valid(bufnr) then return end
@@ -186,7 +187,14 @@ function M.register_callback(attached_bufs)
 		if type == util.JobType.EVAL_LINE then
 			util.emit_signal('eval_done', bufnr, extmark, output, diags)
 		elseif type == util.JobType.PARSE_LINE then
-			util.emit_signal('parse_done', bufnr, extmark, out_syms, in_syms)
+			util.emit_signal(
+				'parse_done',
+				bufnr,
+				extmark,
+				out_syms,
+				in_syms,
+				norm_expr
+			)
 		elseif type == util.JobType.GET_DEFS then
 			handle_get_defs(attached_bufs, defs)
 		end

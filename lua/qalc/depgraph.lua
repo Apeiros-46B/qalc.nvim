@@ -10,7 +10,7 @@ function M.new(bufnr)
 
 	self.bufnr = bufnr
 
-	-- extmark_id -> { out_syms, in_syms }
+	-- extmark_id -> { out_syms, in_syms, norm_expr }
 	self.nodes = {}
 
 	-- symbol -> extmark_id
@@ -23,7 +23,7 @@ function M.new(bufnr)
 	return self
 end
 
-function M:update_node(extmark, out_syms, in_syms)
+function M:update_node(extmark, out_syms, in_syms, norm_expr)
 	local old = self.nodes[extmark] or { out_syms = {}, in_syms = {} }
 	local deleted_syms = {}
 	local duplicate_syms = {}
@@ -97,10 +97,14 @@ function M:update_node(extmark, out_syms, in_syms)
 		self.duplicate_syms[extmark] = nil
 	end
 
-	if #valid_out_syms == 0 and #in_syms == 0 then
+	if #valid_out_syms == 0 and #in_syms == 0 and (not norm_expr or norm_expr == '') then
 		self.nodes[extmark] = nil
 	else
-		self.nodes[extmark] = { out_syms = valid_out_syms, in_syms = clean_in_syms }
+		self.nodes[extmark] = {
+			out_syms = valid_out_syms,
+			in_syms = clean_in_syms,
+			norm_expr = norm_expr,
+		}
 	end
 
 	return deleted_syms, broken_dependents

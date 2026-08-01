@@ -99,26 +99,19 @@ std::string clean_symbol_name(std::string s, bool strip_escapes);
 bool get_canonical_name(const MathStructure& ast, std::string& out);
 
 // extract dependency information from a structure
-// we need to handle a lot of horrific edge cases because qalc's grammar is very complex
-// * assignment vs comparison:
-// -> abc = 5 looks like an equation but gets transformed into save(5, 'abc') during eval
-// -> f(x) = 5x is an equation, NOT a definition or assignment! function defs are f(x) := 5x
+// definitions must be normalized to save() before extraction
 // * quoted symbols (e.g. 'x')
-// -> when on the LHS of a equality (=)/assignment (:=) or in save(5, 'x'), it saves the
-//    value to the UNQUOTED expression. 'x' evaluates to 'x' but x now evaluates to 5.
-//    therefore, the unquoted symbol (x) should be tracked as an out sym
+// -> when used as a save() target, the value is saved to the UNQUOTED expression.
+//    'x' evaluates to 'x' but x now evaluates to the saved value. therefore, the
+//    unquoted symbol (x) should be tracked as an out sym
 // -> when on the RHS of an equality/..., it (quoted or not) should NOT be counted as a
 //    dependency because it evaluates to a symbol instead of the actual value
 // -> backslashed symbols (\x) seem to have the same behaviour EXCEPT in function defs,
-//    in which they serve as implicit positional args (\x = 1st argument, \y = 2nd, etc)
+//    in which they serve as implicit positional args (\x = 1st arg, \y = 2nd, etc)
 void extract_symbols(
 	const MathStructure& ast,
 	std::vector<std::string>& in_syms,
 	std::vector<Definition>& out_syms,
-
-	// temporary state for recursion
-	bool is_top_level = true,
-	const std::string& payload = "",
 	const std::vector<std::string>& local_vars = {}
 );
 

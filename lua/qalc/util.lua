@@ -24,7 +24,7 @@ M.comment_pat = '#.*$'
 -- events:
 -- 'eval_started',   (bufnr, extmarks)
 -- 'eval_done',      (bufnr, extmark, output, diags, outs, ins)
--- 'parse_done',     (bufnr, extmark, out_syms, in_syms)
+-- 'parse_done',     (bufnr, extmark, out_syms, in_syms, norm_expr)
 -- 'diags_ready',    (bufnr, extmark, diags)
 -- 'result_cleared', (bufnr, extmark)
 

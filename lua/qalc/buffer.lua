@@ -176,11 +176,16 @@ function M.get_graph(bufnr)
 	return M.attached_bufs[bufnr]
 end
 
-util.connect_signal('parse_done', function(bufnr, extmark, out_syms, in_syms)
+util.connect_signal('parse_done', function(bufnr, extmark, out_syms, in_syms, norm_expr)
 	local graph = M.attached_bufs[bufnr]
 	if not graph then return end
 
-	local deleted_syms, broken_dependents = graph:update_node(extmark, out_syms, in_syms)
+	local deleted_syms, broken_dependents = graph:update_node(
+		extmark,
+		out_syms,
+		in_syms,
+		norm_expr
+	)
 
 	for _, sym in ipairs(deleted_syms) do
 		require('qalc.bridge').submit(util.JobType.DELETE_SYM, bufnr, extmark, sym)

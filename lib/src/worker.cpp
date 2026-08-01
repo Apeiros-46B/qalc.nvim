@@ -94,7 +94,7 @@ int lua_submit_job(lua_State* L) {
 
 // set the callback used when jobs complete
 // lib.set_callback(function(...) ... end)
-// callback should be a function of 7 arguments:
+// callback should be a function of 9 arguments:
 // - type (int)
 // - bufnr (int)
 // - extmark_id (int)
@@ -102,6 +102,8 @@ int lua_submit_job(lua_State* L) {
 // - diagnostics (tbl)
 // - out_syms (tbl)
 // - in_syms (tbl)
+// - definitions (tbl)
+// - norm_expr (str)
 int lua_set_callback(lua_State* L) {
 	if (!lua_isfunction(L, 1)) {
 		luaL_error(L, "expected function as arg 1");
@@ -261,10 +263,25 @@ static void clear_syms(Calculator* calc) {
 // worker thread
 // parse an expression and extract assigned and read symbols, along with any messages
 static void parse_line(Calculator* calc, Job& job, JobResult& result) {
+	ParseOptions opts = job.get_parse_options();
+	std::string expr = job.payload;
+	// thankfully this exists
+	transform_expression_for_equals_save(expr, opts);
+
 	MathStructure ast;
-	calc->parse(&ast, job.payload, job.get_parse_options());
+	calc->parse(&ast, expr, opts);
+	if (
+		ast.type() == STRUCT_COMPARISON &&
+		ast.comparisonType() == ComparisonType::COMPARISON_EQUALS
+	) {
+		// prevent calculateAndPrint() from reinterpreting the comparison as a save
+		expr = "(" + expr + ")";
+	}
+	if (expr != job.payload) {
+		result.norm_expr = expr;
+	}
 	get_diagnostics(calc, result);
-	extract_symbols(ast, result.in_syms, result.out_syms, true, job.payload);
+	extract_symbols(ast, result.in_syms, result.out_syms);
 }
 
 // worker thread
@@ -282,7 +299,7 @@ static void eval_line(Calculator* calc, Job& job, JobResult& result) {
 	// MathStructure ast;
 	// calc->parse(&ast, job.payload, job.get_parse_options());
 	// get_diagnostics(calc, result);
-	// extract_symbols(ast, result.in_syms, result.out_syms, true, job.payload);
+	// extract_symbols(ast, result.in_syms, result.out_syms);
 	// result.output = dump_ast(ast);
 }
 
@@ -386,14 +403,14 @@ void Worker::process_results() {
 		JobResult res = std::move(ready_results.front());
 		ready_results.pop();
 
-		// at the end of the scope, shrink the stack back to where it is now
+		// prevent stack leak in loop
 		lua::StackGuard guard(L, 0);
 
 		if (callback_ref != LUA_NOREF) {
-			// push the callback onto the stack
+			// pushes 1 item (the callback)
 			lua_rawgeti(L, LUA_REGISTRYINDEX, callback_ref);
 
-			// push 8 args
+			// pushes 9 args
 			lua::push(L,
 				static_cast<int>(res.type),
 				res.bufnr,
@@ -404,9 +421,10 @@ void Worker::process_results() {
 			lua::make_array<Definition>(L, res.out_syms, Definition::to_lua);
 			lua::make_array<std::string>(L, res.in_syms);
 			lua::make_array<Definition>(L, res.definitions, Definition::to_lua);
+			lua::push(L, res.norm_expr);
 
-			// call
-			if (lua_pcall(L, 8, 0, 0) != LUA_OK) {
+			// pops callback + 9 args (10 items)
+			if (lua_pcall(L, 9, 0, 0) != LUA_OK) {
 				fprintf(stderr, "qalc error: %s\n", lua_tostring(L, -1));
 				lua_pop(L, 1);
 			}

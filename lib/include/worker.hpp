@@ -79,6 +79,7 @@ struct JobResult {
 	// empty unless type is PARSE_LINE
 	std::vector<Definition> out_syms;
 	std::vector<std::string> in_syms;
+	std::string norm_expr;
 
 	// empty unless type is GET_DEFS
 	std::vector<Definition> definitions;

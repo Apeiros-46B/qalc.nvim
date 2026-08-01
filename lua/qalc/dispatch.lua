@@ -37,17 +37,22 @@ function M.run_cascade(bufnr, graph, cascade, cycle_diags, dup_diags)
 
 					if #line_marks > 0 and line_marks[1][1] == id then
 						-- active mark, safe to evaluate
+						local node = graph.nodes[id]
+						local expr = node and node.norm_expr
+						if not expr or expr == '' then
+							expr = vim.api.nvim_buf_get_lines(
+								bufnr,
+								lnum,
+								lnum + 1,
+								false
+							)[1] or ''
+						end
 
 						-- ensure idempotency by deleting all possible output symbols first
 						-- makes global shadowing warning consistent and also prevents self-ref
 						M.clear_out_syms_for(bufnr, graph, id)
 
-						require('qalc.bridge').submit(
-							util.JobType.EVAL_LINE,
-							bufnr,
-							id,
-							vim.api.nvim_buf_get_lines(bufnr, lnum, lnum+1, false)[1] or ''
-						)
+						require('qalc.bridge').submit(util.JobType.EVAL_LINE, bufnr, id, expr)
 					else
 						util.emit_signal('result_cleared', bufnr, id)
 					end
