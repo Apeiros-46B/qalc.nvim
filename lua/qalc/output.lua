@@ -158,31 +158,37 @@ vim.api.nvim_set_decoration_provider(util.ns_ui, {
 	end,
 
 	on_range = function(_, _, bufnr, start_lnum, _, end_lnum, _)
-		-- exclude end
-		for lnum = start_lnum, end_lnum - 1 do
-			-- find active tracking mark
-			local tracking_marks = vim.api.nvim_buf_get_extmarks(
-				bufnr, util.ns_track, {lnum, 0}, {lnum, -1}, { limit = 1 }
-			)
+		if end_lnum <= start_lnum then return end
 
-			if #tracking_marks > 0 then
-				local tracking_mark = tracking_marks[1][1]
-				local text = result_cache[bufnr][tracking_mark]
+		local tracking_marks = vim.api.nvim_buf_get_extmarks(
+			bufnr,
+			util.ns_track,
+			{start_lnum, 0},
+			{end_lnum - 1, -1},
+			{}
+		)
+		local seen_rows = {}
 
-				if text then
-					local virt_text = {}
-					if cfg.display.sign ~= false then
-						virt_text[#virt_text+1] = { cfg.display.sign .. ' ', cfg._sign_hl }
-					end
-					virt_text[#virt_text+1] = { text, cfg._result_hl }
-					vim.api.nvim_buf_set_extmark(bufnr, util.ns_ui, lnum, 0, {
-						ephemeral = true,
-						virt_text = virt_text,
-						virt_text_pos = 'eol',
-						hl_mode = 'combine',
-					})
+		for _, mark in ipairs(tracking_marks) do
+			local tracking_mark = mark[1]
+			local lnum = mark[2]
+			local text = result_cache[bufnr][tracking_mark]
+
+			if not seen_rows[lnum] and text then
+				local virt_text = {}
+				if cfg.display.sign ~= false then
+					virt_text[#virt_text+1] = { cfg.display.sign .. ' ', cfg._sign_hl }
 				end
+				virt_text[#virt_text+1] = { text, cfg._result_hl }
+				vim.api.nvim_buf_set_extmark(bufnr, util.ns_ui, lnum, 0, {
+					ephemeral = true,
+					virt_text = virt_text,
+					virt_text_pos = 'eol',
+					hl_mode = 'combine',
+				})
 			end
+
+			seen_rows[lnum] = true
 		end
 	end
 })

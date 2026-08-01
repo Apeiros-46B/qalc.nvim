@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <cstring>
 #include <string>
 #include <sstream>
 #include <vector>
@@ -39,7 +40,7 @@ extern "C" {
 
 Definition::Definition() {}
 
-Definition::Definition(LspKind type, std::string ref_name):
+Definition::Definition(LspKind type, const std::string& ref_name):
 	type{type}, ref_name{ref_name}, input_name{ref_name}, documentation{""}
 {}
 
@@ -59,7 +60,7 @@ void Definition::to_lua(lua_State* L, const Definition& self) {
 void populate_def(
 	Calculator* calc,
 	Variable* var,
-	PrintOptions po,
+	const PrintOptions& po,
 	Definition& def
 ) {
 	std::string val;
@@ -78,14 +79,14 @@ void populate_def(
 	}
 }
 
-static std::string split_composite(CompositeUnit* unit, PrintOptions po) {
+static std::string split_composite(CompositeUnit* unit, const PrintOptions& po) {
 	return unit->print(po, true, TAG_TYPE_TERMINAL, false, false);
 }
 
 void populate_def(
 	Calculator* calc,
 	Unit* unit,
-	PrintOptions po,
+	const PrintOptions& po,
 	Definition& def
 ) {
 
@@ -160,7 +161,7 @@ void populate_def(
 void populate_def(
 	Calculator* calc,
 	MathFunction* func,
-	PrintOptions po,
+	const PrintOptions& po,
 	Definition& def
 ) {
 	def.type = LspKind::FUNC;
@@ -302,7 +303,7 @@ void populate_def(
 void push_prefix_def(
 	Calculator* calc,
 	Prefix* pref,
-	PrintOptions po,
+	const PrintOptions& po,
 	std::vector<Definition>& defs
 ) {
 	Definition def;
@@ -351,19 +352,75 @@ void push_prefix_def(
 	defs.push_back(std::move(def));
 }
 
-bool is_valid_var_name(const std::string& s) {
-	if (s.empty()) return false;
-	if (s == "undefined") return false;
-	if (!std::isalpha(s[0]) && s[0] != '_') return false;
-	for (char c : s) {
-		if (!std::isalnum(c) && c != '_') return false;
+bool is_valid_var_name(Calculator* calc, const std::string& s) {
+	return s != "undefined" && calc->variableNameIsValid(s);
+}
+
+bool is_valid_function_name(Calculator* calc, const std::string& s) {
+	return s != "undefined" && calc->functionNameIsValid(s);
+}
+
+void extract_function_calls(
+	Calculator* calc,
+	const std::string& expr,
+	std::vector<std::string>& in_syms
+) {
+	constexpr const char* delims = ".'\"@\\?~+-*/^&|!<>=:,;[]{}()";
+	char quote = '\0';
+	bool escaped = false;
+
+	for (size_t paren = 0; paren < expr.size(); ++paren) {
+		char current = expr[paren];
+		if (escaped) {
+			escaped = false;
+			continue;
+		}
+		if (current == '\\') {
+			escaped = true;
+			continue;
+		}
+		if (quote != '\0') {
+			if (current == quote) quote = '\0';
+			continue;
+		}
+		if (current == '\'' || current == '"') {
+			quote = current;
+			continue;
+		}
+		if (current != '(') continue;
+
+		size_t end = paren;
+		while (end > 0 && std::isspace(static_cast<unsigned char>(expr[end - 1]))) {
+			--end;
+		}
+
+		size_t start = end;
+		while (start > 0) {
+			unsigned char c = static_cast<unsigned char>(expr[start - 1]);
+			if (std::isspace(c) || std::strchr(delims, c)) break;
+			--start;
+		}
+
+		std::string name = expr.substr(start, end - start);
+		if (
+			is_valid_function_name(calc, name) &&
+			std::find(in_syms.begin(), in_syms.end(), name) == in_syms.end()
+		) {
+			in_syms.push_back(std::move(name));
+		}
 	}
-	return true;
 }
 
 std::string clean_symbol_name(std::string s, bool strip_escapes) {
 	// remove accidental spaces
-	s.erase(std::remove_if(s.begin(), s.end(), ::isspace), s.end());
+	s.erase(
+		std::remove_if(
+			s.begin(),
+			s.end(),
+			[](unsigned char c) { return std::isspace(c); }
+		),
+		s.end()
+	);
 
 	// remove escapes if needed (for LHS definitions)
 	if (strip_escapes && !s.empty()) {
@@ -402,6 +459,7 @@ bool get_canonical_name(const MathStructure& ast, std::string& out) {
 }
 
 void extract_symbols(
+	Calculator* calc,
 	const MathStructure& ast,
 	std::vector<std::string>& in_syms,
 	std::vector<Definition>& out_syms,
@@ -423,7 +481,7 @@ void extract_symbols(
 			}
 
 			std::string name = ast.symbol();
-			if (!is_valid_var_name(name)) break;
+			if (!is_valid_var_name(calc, name)) break;
 			if (std::find(local_vars.begin(), local_vars.end(), name) == local_vars.end()) {
 				in_syms.push_back(name);
 			}
@@ -437,7 +495,7 @@ void extract_symbols(
 
 			// leave escapes intact for RHS dependencies
 			name = clean_symbol_name(name, false);
-			if (!is_valid_var_name(name)) break;
+			if (!is_valid_var_name(calc, name)) break;
 			if (std::find(local_vars.begin(), local_vars.end(), name) == local_vars.end()) {
 				in_syms.push_back(name);
 			}
@@ -459,7 +517,7 @@ void extract_symbols(
 
 					if (!lhs->isSymbolic() && get_canonical_name(*lhs, canonical_target)) {
 						canonical_target = clean_symbol_name(canonical_target, true);
-						if (is_valid_var_name(canonical_target)) {
+						if (is_valid_var_name(calc, canonical_target)) {
 							out_syms.push_back({LspKind::VAR, canonical_target});
 						}
 					} else {
@@ -471,17 +529,21 @@ void extract_symbols(
 						size_t paren_start = sig.find('(');
 						if (paren_start == std::string::npos) {
 							// no parentheses, plain variable assignment like x := 1
-							if (is_valid_var_name(sig)) {
+							if (is_valid_var_name(calc, sig)) {
 								out_syms.push_back({LspKind::VAR, sig});
 							}
 						} else {
 							std::string f_name = sig.substr(0, paren_start);
 							f_name.erase(
-								std::remove_if(f_name.begin(), f_name.end(), ::isspace),
+								std::remove_if(
+									f_name.begin(),
+									f_name.end(),
+									[](unsigned char c) { return std::isspace(c); }
+								),
 								f_name.end()
 							);
 
-							if (is_valid_var_name(f_name)) {
+							if (is_valid_function_name(calc, f_name)) {
 								out_syms.push_back({LspKind::FUNC, f_name});
 							}
 
@@ -495,18 +557,18 @@ void extract_symbols(
 								std::string arg;
 								while (std::getline(ss, arg, ',')) {
 									arg = clean_symbol_name(arg, true);
-									if (is_valid_var_name(arg)) {
+									if (is_valid_var_name(calc, arg)) {
 										new_locals.push_back(arg);
 									}
 								}
 							}
 						}
 					}
-					extract_symbols(*rhs, in_syms, out_syms, new_locals);
+					extract_symbols(calc, *rhs, in_syms, out_syms, new_locals);
 					return;
 				} else {
 					// normal function call (e.g., sin(x) or myfunc(5))
-					if (!is_valid_var_name(fn_name)) break;
+					if (!is_valid_function_name(calc, fn_name)) break;
 					if (std::find(local_vars.begin(), local_vars.end(), fn_name) == local_vars.end()) {
 						in_syms.push_back(fn_name);
 					}
@@ -522,7 +584,7 @@ void extract_symbols(
 	// fallback for others
 	for (size_t i = 1; i <= ast.countChildren(); ++i) {
 		if (const MathStructure* child = ast.getChild(i)) {
-			extract_symbols(*child, in_syms, out_syms, local_vars);
+			extract_symbols(calc, *child, in_syms, out_syms, local_vars);
 		}
 	}
 }

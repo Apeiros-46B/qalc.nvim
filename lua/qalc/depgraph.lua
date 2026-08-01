@@ -208,7 +208,7 @@ function M:_process_cycle_errors(cyclic_nodes)
 	for _, id in ipairs(cyclic_nodes) do
 		self.had_cycle_error[id] = true
 		diags[id] = {{
-			message = 'Reference cycle found, refusing to evaluate',
+			message = 'Reference cycle found here or in dependents, cannot evaluate',
 			severity = vim.diagnostic.severity.ERROR
 		}}
 	end

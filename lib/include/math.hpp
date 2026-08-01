@@ -19,17 +19,27 @@ struct Definition {
 	std::vector<std::string> all_names;
 
 	Definition();
-	Definition(LspKind type, std::string ref_name);
+	Definition(LspKind type, const std::string& ref_name);
 
 	static void to_lua(lua_State* L, const Definition& self);
 };
 
-void populate_def(Calculator* calc, Variable* var, PrintOptions po, Definition& def);
-void populate_def(Calculator* calc, Unit* unit, PrintOptions po, Definition& def);
+void populate_def(
+	Calculator* calc,
+	Variable* var,
+	const PrintOptions& po,
+	Definition& def
+);
+void populate_def(
+	Calculator* calc,
+	Unit* unit,
+	const PrintOptions& po,
+	Definition& def
+);
 void populate_def(
 	Calculator* calc,
 	MathFunction* func,
-	PrintOptions po,
+	const PrintOptions& po,
 	Definition& def
 );
 
@@ -45,7 +55,7 @@ template<typename T>
 void push_def(
 	Calculator* calc,
 	T* expr,
-	PrintOptions po,
+	const PrintOptions& po,
 	std::vector<Definition>& defs
 ) {
 	if (expr->isLocal() || !expr->isActive()) {
@@ -84,12 +94,20 @@ void push_def(
 void push_prefix_def(
 	Calculator* calc,
 	Prefix* prefix,
-	PrintOptions po,
+	const PrintOptions& po,
 	std::vector<Definition>& defs
 );
 
 // check if a string is a single symbol
-bool is_valid_var_name(const std::string& s);
+bool is_valid_var_name(Calculator* calc, const std::string& s);
+bool is_valid_function_name(Calculator* calc, const std::string& s);
+
+// extract call names independently of the calculator's current function definitions
+void extract_function_calls(
+	Calculator* calc,
+	const std::string& expression,
+	std::vector<std::string>& in_syms
+);
 
 // clean a symbol name, optionally removing backslashes and quotes
 std::string clean_symbol_name(std::string s, bool strip_escapes);
@@ -109,6 +127,7 @@ bool get_canonical_name(const MathStructure& ast, std::string& out);
 // -> backslashed symbols (\x) seem to have the same behaviour EXCEPT in function defs,
 //    in which they serve as implicit positional args (\x = 1st arg, \y = 2nd, etc)
 void extract_symbols(
+	Calculator* calc,
 	const MathStructure& ast,
 	std::vector<std::string>& in_syms,
 	std::vector<Definition>& out_syms,

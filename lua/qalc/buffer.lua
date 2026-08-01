@@ -29,18 +29,29 @@ function M.is_attached(bufnr)
 	return M.attached_bufs[bufnr] ~= nil
 end
 
+function M.is_active(bufnr)
+	return cur_active_buf == bufnr and bufnr == vim.api.nvim_get_current_buf()
+end
+
 -- re-initialize a buffer completely
 function M.hard_reset(bufnr)
 	local bridge = require('qalc.bridge')
 
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 	if not M.is_attached(bufnr) then return end
+	if bufnr ~= vim.api.nvim_get_current_buf() then
+		M.attached_bufs[bufnr].needs_initialization = true
+		return
+	end
+	cur_active_buf = bufnr
+	bridge.register_callback(M.attached_bufs)
 
 	require('qalc.output').clear_all(bufnr)
 	vim.api.nvim_buf_clear_namespace(bufnr, util.ns_track, 0, -1)
 	bridge.submit(util.JobType.CLEAR_SYMS, bufnr, -1, '')
 
 	local graph = require('qalc.depgraph').new(bufnr)
+	graph.needs_initialization = false
 	M.attached_bufs[bufnr] = graph
 
 	-- first initialization, we need to mark the graph as initializing so it can
@@ -72,7 +83,10 @@ local function flush_dirty_bufs()
 	flush_scheduled = false
 
 	for bufnr, state in pairs(dirty_bufs) do
-		if vim.api.nvim_buf_is_valid(bufnr) and M.is_attached(bufnr) then
+		local graph = M.attached_bufs[bufnr]
+		if vim.api.nvim_buf_is_valid(bufnr) and graph and M.is_active(bufnr)
+			and not graph.needs_initialization
+		then
 			local total_lines = vim.api.nvim_buf_line_count(bufnr)
 
 			local min_lnum = state.min_lnum
@@ -109,6 +123,8 @@ local function flush_dirty_bufs()
 			for _, mark in ipairs(eof_marks) do
 				bridge.submit(util.JobType.PARSE_LINE, bufnr, mark[1], '')
 			end
+		elseif graph then
+			graph.needs_initialization = true
 		end
 	end
 
@@ -116,6 +132,14 @@ local function flush_dirty_bufs()
 end
 
 local function on_lines(_, bufnr, _, first_lnum, _, new_last_lnum)
+	local graph = M.attached_bufs[bufnr]
+	if not graph then return true end
+	if not M.is_active(bufnr) then
+		graph.needs_initialization = true
+		dirty_bufs[bufnr] = nil
+		return
+	end
+
 	-- accumulate the affected ranges during the edit block
 	local state = dirty_bufs[bufnr] or { min_lnum = first_lnum, max_lnum = new_last_lnum }
 	state.min_lnum = math.min(state.min_lnum, first_lnum)
@@ -133,25 +157,39 @@ end
 function M.attach(bufnr)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 
-	require('qalc.bridge').register_callback(M.attached_bufs)
-	require('qalc.hover').bind_key(bufnr)
-
-	if M.is_attached(bufnr) then return true end
+	if M.is_attached(bufnr) then
+		local graph = M.attached_bufs[bufnr]
+		if bufnr == vim.api.nvim_get_current_buf() and graph.needs_initialization then
+			M.focus_buffer(bufnr)
+		end
+		return true
+	end
 
 	vim.fn.bufload(bufnr)
-	M.attached_bufs[bufnr] = require('qalc.depgraph').new(bufnr)
+	if M.is_attached(bufnr) then return true end
+	require('qalc.hover').bind_key(bufnr)
+
+	local graph = require('qalc.depgraph').new(bufnr)
+	graph.needs_initialization = true
+	M.attached_bufs[bufnr] = graph
 
 	vim.api.nvim_buf_attach(bufnr, false, {
 		on_lines = on_lines,
 		on_detach = function(_, detached_bufnr)
 			M.attached_bufs[detached_bufnr] = nil
 			dirty_bufs[detached_bufnr] = nil
+			if cur_active_buf == detached_bufnr then
+				cur_active_buf = nil
+			end
 			require('qalc.output').clear_all(detached_bufnr)
 		end,
 	})
-	vim.bo.filetype = 'qalc'
+	vim.bo[bufnr].filetype = 'qalc'
 
-	M.hard_reset(bufnr)
+	if bufnr == vim.api.nvim_get_current_buf() then
+		cur_active_buf = bufnr
+		M.hard_reset(bufnr)
+	end
 end
 
 -- update C++-side state in the newly focused buffer
@@ -159,14 +197,24 @@ function M.focus_buffer(bufnr)
 	local bridge = require('qalc.bridge')
 
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
-	if not M.is_attached(bufnr) or cur_active_buf == bufnr then return end
+	if bufnr ~= vim.api.nvim_get_current_buf() then return end
+	if not M.is_attached(bufnr) then
+		cur_active_buf = nil
+		return
+	end
+	if cur_active_buf == bufnr then return end
 	cur_active_buf = bufnr
+
+	local graph = M.attached_bufs[bufnr]
+	if graph.needs_initialization then
+		M.hard_reset(bufnr)
+		return
+	end
 
 	-- wipe local variables from other buffers
 	bridge.submit(util.JobType.CLEAR_SYMS, bufnr, -1, '')
 
-	local graph = M.attached_bufs[bufnr]
-	if not graph or graph.is_initializing then return end
+	if graph.is_initializing then return end
 
 	local cascade, cycle_diags, dup_diags = graph:get_full_sort()
 	require('qalc.dispatch').run_cascade(bufnr, graph, cascade, cycle_diags, dup_diags)
@@ -179,6 +227,13 @@ end
 util.connect_signal('parse_done', function(bufnr, extmark, out_syms, in_syms, norm_expr)
 	local graph = M.attached_bufs[bufnr]
 	if not graph then return end
+	if not M.is_active(bufnr) then
+		graph.needs_initialization = true
+		return
+	end
+	if #vim.api.nvim_buf_get_extmark_by_id(bufnr, util.ns_track, extmark, {}) == 0 then
+		return
+	end
 
 	local deleted_syms, broken_dependents = graph:update_node(
 		extmark,

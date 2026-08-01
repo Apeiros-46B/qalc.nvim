@@ -31,7 +31,9 @@ local augroup = vim.api.nvim_create_augroup('QalcBufferManagement', { clear = tr
 vim.api.nvim_create_autocmd({ 'BufReadPost', 'BufNewFile' }, {
 	group = augroup,
 	pattern = { '*.qalc' },
-	command = 'QalcAttach',
+	callback = function(args)
+		require('qalc.buffer').attach(args.buf)
+	end,
 })
 
 -- sync state whenever focusing a buffer
@@ -40,10 +42,7 @@ vim.api.nvim_create_autocmd('BufEnter', {
 	pattern = '*',
 	callback = function(args)
 		vim.schedule(function()
-			local buffer = require('qalc.buffer')
-			if buffer.is_attached(args.buf) then
-				buffer.focus_buffer(args.buf)
-			end
+			require('qalc.buffer').focus_buffer(args.buf)
 		end)
 	end
 })

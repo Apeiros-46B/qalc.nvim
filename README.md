@@ -79,11 +79,6 @@ With the exception of interactive session commands (like `set`, `delete`, `info`
 
 ## Potentially unexpected behaviours
 
-- The buffer does not evaluate top-down like code; defined variables can
-  referenced anywhere (akin to a 1D spreadsheet with named values).
-- Dependency tracking treats functions and variables as if they were in one
-  namespace even though libqalculate treats them as separate, so don't give a
-  function and a variable the same name.
 - 1:1 feature parity with `qalc` CLI frontend is a non-goal. Calling `qalc` as
   a subprocess (which was what this plugin used to do) is slow and prone to
   bugs, and perfectly emulating its behaviour using the C++ library is almost
@@ -92,6 +87,16 @@ With the exception of interactive session commands (like `set`, `delete`, `info`
   Notable features that will not be supported are interactive commands (like
   `set` and `delete`), `ans` variables, and the legacy `function` syntax (use
   `f(x) := ...` instead).
+  - Implicit multiplication of symbols (`xy` = `x * y`) is forcibly disabled
+    and cannot be manually re-enabled, because it causes issues with extracting
+    symbol dependencies to build the dependency graph. Numeric implicit
+    multiplication (`2x`) or implicit multiplication with a space (`x y`) is
+    still allowed.
+  - Dependency tracking treats functions and variables as if they were in one
+    namespace even though libqalculate treats them as separate, so don't give a
+    function and a variable the same name.
+- The buffer does not evaluate top-down like code; defined variables can
+  referenced anywhere (akin to a 1D spreadsheet with named values).
 - If you have multiple large qalc buffers, you may experience some lag when
   switching between them. This is due to a technical limitation of
   `libqalculate` that I unfortunately can't really do anything about. (The

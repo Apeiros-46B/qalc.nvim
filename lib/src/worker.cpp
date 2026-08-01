@@ -1,3 +1,5 @@
+#include <chrono>
+#include <cstddef>
 #include <mutex>
 #include <queue>
 #include <thread>
@@ -21,7 +23,9 @@ namespace worker {
 
 static Worker* worker = nullptr;
 
-constexpr const char* TIMEOUT_MSG = "Calculation timed out.";
+constexpr int EVAL_TIMEOUT_MS = 2000;
+constexpr const char* TIMEOUT_MSG = "Calculation took too long";
+constexpr const char* PURGED_TIMEOUT_MSG = "Dependent calculation took too long";
 
 void Diagnostic::to_lua(lua_State* L, const Diagnostic& self) {
 	lua_createtable(L, 0, 2);
@@ -248,14 +252,14 @@ static void delete_sym(Calculator* calc, const std::string& sym) {
 // worker thread
 // clear all user-defined symbols
 static void clear_syms(Calculator* calc) {
-	for (int i = calc->variables.size() - 1; i >= 0; --i) {
-		if (calc->variables[i]->isLocal()) {
-			calc->variables[i]->destroy();
+	for (std::size_t i = calc->variables.size(); i > 0; --i) {
+		if (calc->variables[i - 1]->isLocal()) {
+			calc->variables[i - 1]->destroy();
 		}
 	}
-	for (int i = calc->functions.size() - 1; i >= 0; --i) {
-		if (calc->functions[i]->isLocal()) {
-			calc->functions[i]->destroy();
+	for (std::size_t i = calc->functions.size(); i > 0; --i) {
+		if (calc->functions[i - 1]->isLocal()) {
+			calc->functions[i - 1]->destroy();
 		}
 	}
 }
@@ -281,26 +285,31 @@ static void parse_line(Calculator* calc, Job& job, JobResult& result) {
 		result.norm_expr = expr;
 	}
 	get_diagnostics(calc, result);
-	extract_symbols(ast, result.in_syms, result.out_syms);
+	extract_symbols(calc, ast, result.in_syms, result.out_syms);
+	extract_function_calls(calc, job.payload, result.in_syms);
 }
 
 // worker thread
 // evaluate an expression
-static void eval_line(Calculator* calc, Job& job, JobResult& result) {
+static bool eval_line(Calculator* calc, Job& job, JobResult& result) {
+	auto started_at = std::chrono::steady_clock::now();
 	result.output = calc->calculateAndPrint(
 		job.payload,
-		2000,
+		EVAL_TIMEOUT_MS,
 		job.get_eval_options(),
 		job.get_print_options()
 	);
+	auto elapsed = std::chrono::steady_clock::now() - started_at;
 	get_diagnostics(calc, result);
 
 	// for debugging symbol extraction
 	// MathStructure ast;
 	// calc->parse(&ast, job.payload, job.get_parse_options());
 	// get_diagnostics(calc, result);
-	// extract_symbols(ast, result.in_syms, result.out_syms);
+	// extract_symbols(calc, ast, result.in_syms, result.out_syms);
 	// result.output = dump_ast(ast);
+
+	return elapsed >= std::chrono::milliseconds(EVAL_TIMEOUT_MS);
 }
 
 // worker thread
@@ -362,9 +371,10 @@ void Worker::main_loop() {
 					break;
 				}
 				case JobType::EVAL_LINE: {
-					eval_line(calc, job, result);
+					bool timed_out = eval_line(calc, job, result);
 
-					if (calc->aborted()) {
+					if (timed_out) {
+						result.output.clear();
 						result.diagnostics.push_back({Severity::ERROR, TIMEOUT_MSG});
 						purge_eval_queue();
 					}
@@ -449,7 +459,7 @@ void Worker::purge_eval_queue() {
 			result.bufnr = pending.bufnr;
 			result.extmark_id = pending.extmark_id;
 			result.output = "";
-			result.diagnostics.push_back({Severity::ERROR, TIMEOUT_MSG});
+			result.diagnostics.push_back({Severity::ERROR, PURGED_TIMEOUT_MSG});
 
 			output.push(std::move(result));
 		} else {

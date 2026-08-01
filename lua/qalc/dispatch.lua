@@ -72,7 +72,13 @@ function M.clear_out_syms_for(bufnr, graph, id)
 end
 
 util.guard_signal('eval_done', function(bufnr, extmark, _, _)
-	local graph = require('qalc.buffer').get_graph(bufnr)
+	local buffer = require('qalc.buffer')
+	if not buffer.is_active(bufnr) then return false end
+	if #vim.api.nvim_buf_get_extmark_by_id(bufnr, util.ns_track, extmark, {}) == 0 then
+		return false
+	end
+
+	local graph = buffer.get_graph(bufnr)
 
 	-- don't allow results to propagate if cycle errors are present
 	if graph and graph.had_cycle_error[extmark] then
