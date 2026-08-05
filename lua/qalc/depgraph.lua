@@ -5,10 +5,13 @@ local M = {}
 M.__index = M
 
 ---@param bufnr number The buffer this graph is attached to
-function M.new(bufnr)
+function M.new(bufnr, lines)
+	lines = lines or vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+
 	local self = setmetatable({}, M)
 
 	self.bufnr = bufnr
+	self.doc = require('qalc.document').new(lines)
 
 	-- extmark_id -> { out_syms, in_syms, norm_expr }
 	self.nodes = {}

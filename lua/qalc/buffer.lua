@@ -5,7 +5,7 @@ local util = require('qalc.util')
 local M = {}
 
 -- mapping of bufnr -> depgraph. if a bufnr is present then qalc is attached to it
-M.attached_bufs = {}
+M.graphs = {}
 
 local cur_active_buf = nil
 
@@ -26,7 +26,7 @@ function M.new_buf(name)
 end
 
 function M.is_attached(bufnr)
-	return M.attached_bufs[bufnr] ~= nil
+	return M.graphs[bufnr] ~= nil
 end
 
 function M.is_active(bufnr)
@@ -40,27 +40,27 @@ function M.hard_reset(bufnr)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 	if not M.is_attached(bufnr) then return end
 	if bufnr ~= vim.api.nvim_get_current_buf() then
-		M.attached_bufs[bufnr].needs_initialization = true
+		M.graphs[bufnr].needs_initialization = true
 		return
 	end
+
 	cur_active_buf = bufnr
-	bridge.register_callback(M.attached_bufs)
+	bridge.register_callback(M.graphs)
 
 	require('qalc.output').clear_all(bufnr)
 	vim.api.nvim_buf_clear_namespace(bufnr, util.ns_track, 0, -1)
 	bridge.submit(util.JobType.CLEAR_SYMS, bufnr, -1, '')
 
-	local graph = require('qalc.depgraph').new(bufnr)
+	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+	local graph = require('qalc.depgraph').new(bufnr, lines)
 	graph.needs_initialization = false
-	M.attached_bufs[bufnr] = graph
+
+	M.graphs[bufnr] = graph
 
 	-- first initialization, we need to mark the graph as initializing so it can
 	-- be properly rebuilt later
 	graph.is_initializing = true
 	graph.pending_parses = 0
-
-	local total_lines = vim.api.nvim_buf_line_count(bufnr)
-	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, total_lines, false)
 
 	for i, text in ipairs(lines) do
 		local id = vim.api.nvim_buf_set_extmark(bufnr, util.ns_track, i - 1, 0, {})
@@ -83,11 +83,13 @@ local function flush_dirty_bufs()
 	flush_scheduled = false
 
 	for bufnr, state in pairs(dirty_bufs) do
-		local graph = M.attached_bufs[bufnr]
+		local graph = M.graphs[bufnr]
 		if vim.api.nvim_buf_is_valid(bufnr) and graph and M.is_active(bufnr)
 			and not graph.needs_initialization
 		then
 			local total_lines = vim.api.nvim_buf_line_count(bufnr)
+			local doc_lines = vim.api.nvim_buf_get_lines(bufnr, 0, total_lines, false)
+			graph.doc:settle(doc_lines)
 
 			local min_lnum = state.min_lnum
 			local max_lnum = math.min(math.max(state.max_lnum, min_lnum + 1), total_lines)
@@ -131,17 +133,23 @@ local function flush_dirty_bufs()
 	dirty_bufs = {}
 end
 
-local function on_lines(_, bufnr, _, first_lnum, _, new_last_lnum)
-	local graph = M.attached_bufs[bufnr]
+local function on_lines(_, bufnr, _, first_lnum, old_last_lnum, new_last_lnum)
+	local graph = M.graphs[bufnr]
 	if not graph then return true end
+
+	graph.doc:apply_edit(first_lnum, old_last_lnum, new_last_lnum)
+
 	if not M.is_active(bufnr) then
 		graph.needs_initialization = true
 		dirty_bufs[bufnr] = nil
 		return
 	end
 
-	-- accumulate the affected ranges during the edit block
-	local state = dirty_bufs[bufnr] or { min_lnum = first_lnum, max_lnum = new_last_lnum }
+	-- accumulate affected ranges during the edit block
+	local state = dirty_bufs[bufnr] or {
+		min_lnum = first_lnum,
+		max_lnum = new_last_lnum,
+	}
 	state.min_lnum = math.min(state.min_lnum, first_lnum)
 	state.max_lnum = math.max(state.max_lnum, new_last_lnum)
 	dirty_bufs[bufnr] = state
@@ -158,7 +166,7 @@ function M.attach(bufnr)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
 
 	if M.is_attached(bufnr) then
-		local graph = M.attached_bufs[bufnr]
+		local graph = M.graphs[bufnr]
 		if bufnr == vim.api.nvim_get_current_buf() and graph.needs_initialization then
 			M.focus_buffer(bufnr)
 		end
@@ -171,12 +179,12 @@ function M.attach(bufnr)
 
 	local graph = require('qalc.depgraph').new(bufnr)
 	graph.needs_initialization = true
-	M.attached_bufs[bufnr] = graph
+	M.graphs[bufnr] = graph
 
 	vim.api.nvim_buf_attach(bufnr, false, {
 		on_lines = on_lines,
 		on_detach = function(_, detached_bufnr)
-			M.attached_bufs[detached_bufnr] = nil
+			M.graphs[detached_bufnr] = nil
 			dirty_bufs[detached_bufnr] = nil
 			if cur_active_buf == detached_bufnr then
 				cur_active_buf = nil
@@ -205,7 +213,7 @@ function M.focus_buffer(bufnr)
 	if cur_active_buf == bufnr then return end
 	cur_active_buf = bufnr
 
-	local graph = M.attached_bufs[bufnr]
+	local graph = M.graphs[bufnr]
 	if graph.needs_initialization then
 		M.hard_reset(bufnr)
 		return
@@ -221,11 +229,11 @@ function M.focus_buffer(bufnr)
 end
 
 function M.get_graph(bufnr)
-	return M.attached_bufs[bufnr]
+	return M.graphs[bufnr]
 end
 
 util.connect_signal('parse_done', function(bufnr, extmark, out_syms, in_syms, norm_expr)
-	local graph = M.attached_bufs[bufnr]
+	local graph = M.graphs[bufnr]
 	if not graph then return end
 	if not M.is_active(bufnr) then
 		graph.needs_initialization = true
