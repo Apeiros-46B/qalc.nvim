@@ -4,7 +4,6 @@
 # TODO
 
 - Implement a way to alter `ParseOptions`, `PrintOptions`, and `EvaluationOptions` (this is normally done with `set` in the `qalc` program, but qalc.nvim now uses the library directly, so this functionality needs to be separately addressed)
-- Write CMake files for dependencies so that users don't have to have `pkg-config` installed in order to build the plugin
 - `display.right_align` and `display.multiline_style`
 
 # qalc.nvim
@@ -25,7 +24,9 @@ A Neovim plugin for reactive spreadsheet-like calculations with unit conversions
 
 ## Installation
 
-Requires CMake, pkg-config, LuaJIT, and libqalculate to be installed.
+Requires CMake, LuaJIT, libqalculate, and libuv to be installed. The libuv
+headers and library used to build the plugin must be ABI-compatible with the
+version your Neovim was built with.
 
 Install using your preferred plugin manager:
 

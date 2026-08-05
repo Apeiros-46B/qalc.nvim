@@ -5,10 +5,11 @@ project(qalcbridge
 	DESCRIPTION "Lua bridge for libqalculate"
 )
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(UV REQUIRED libuv)
-pkg_check_modules(LUA REQUIRED luajit)
-pkg_check_modules(QALC REQUIRED libqalculate>=5.0.0)
+set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
+
+find_package(LibUV REQUIRED)
+find_package(LuaJIT REQUIRED)
+find_package(LibQalculate 5.0.0 REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED
 	src/lib.cpp
@@ -17,14 +18,11 @@ add_library(${PROJECT_NAME} SHARED
 	src/worker.cpp
 )
 target_include_directories(${PROJECT_NAME}
-	PRIVATE ${UV_INCLUDE_DIRS}
-	PRIVATE ${LUA_INCLUDE_DIRS}
-	PRIVATE ${QALC_INCLUDE_DIRS}
 	PRIVATE ${PROJECT_SOURCE_DIR}/include
 )
 target_link_libraries(${PROJECT_NAME}
-	${UV_LIBRARIES}
-	${LUA_LIBRARIES}
-	${QALC_LIBRARIES}
+	PRIVATE LibUV::LibUV
+	PRIVATE LuaJIT::LuaJIT
+	PRIVATE LibQalculate::LibQalculate
 )
 set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 11)
