@@ -1,5 +1,4 @@
 -- extmark-based dependency graph
-local util = require('qalc.util')
 
 local M = {}
 M.__index = M
@@ -286,16 +285,10 @@ function M:get_full_sort()
 	local adj = self:_build_adj()
 
 	local target_nodes = {}
-	-- base target nodes on tracking marks, not self.nodes, so plain math lines are seen
-	local marks = vim.api.nvim_buf_get_extmarks(
-		self.bufnr,
-		util.ns_track,
-		{0, 0},
-		{-1, -1},
-		{}
-	)
-	for _, mark in ipairs(marks) do
-		target_nodes[mark[1]] = true
+	for _, stmt in ipairs(self.doc:records()) do
+		if stmt.mark then
+			target_nodes[stmt.mark] = true
+		end
 	end
 
 	local cascade, cyclic_nodes = self:_topo_sort(adj, target_nodes)

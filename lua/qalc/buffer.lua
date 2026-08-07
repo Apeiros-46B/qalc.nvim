@@ -9,7 +9,7 @@ M.graphs = {}
 
 local cur_active_buf = nil
 
--- bufnr -> { min_lnum, max_lnum }
+-- bufnr -> { retired = { mark_id -> bool } }
 local dirty_bufs = {}
 local flush_scheduled = false
 
@@ -62,11 +62,13 @@ function M.hard_reset(bufnr)
 	graph.is_initializing = true
 	graph.pending_parses = 0
 
-	for i, text in ipairs(lines) do
+	for i, stmt in ipairs(graph.doc:records()) do
 		local id = vim.api.nvim_buf_set_extmark(bufnr, util.ns_track, i - 1, 0, {})
-		if text:gsub(util.comment_pat, ''):match('%S') then
+		graph.doc:set_mark(stmt, id)
+
+		if stmt.text:gsub(util.comment_pat, ''):match('%S') then
 			graph.pending_parses = graph.pending_parses + 1
-			bridge.submit(util.JobType.PARSE_LINE, bufnr, id, text)
+			bridge.submit(util.JobType.PARSE_LINE, bufnr, id, stmt.text)
 		end
 	end
 
@@ -91,39 +93,22 @@ local function flush_dirty_bufs()
 			local doc_lines = vim.api.nvim_buf_get_lines(bufnr, 0, total_lines, false)
 			graph.doc:settle(doc_lines)
 
-			local min_lnum = state.min_lnum
-			local max_lnum = math.min(math.max(state.max_lnum, min_lnum + 1), total_lines)
-
-			-- fetch the fully settled text
-			local lines = vim.api.nvim_buf_get_lines(bufnr, min_lnum, max_lnum, false)
-			for i, text in ipairs(lines) do
-				local row = min_lnum + i - 1
-				local marks = vim.api.nvim_buf_get_extmarks(
-					bufnr, util.ns_track, {row, 0}, {row, -1}, {}
-				)
-
-				if #marks == 0 then
-					local new_id = vim.api.nvim_buf_set_extmark(bufnr, util.ns_track, row, 0, {})
-					-- new mark, cannot possibly be a changed state
-					-- therefore we check against whitespace to avoid sending empty jobs to C++
-					if text:match('%S') then
-						bridge.submit(util.JobType.PARSE_LINE, bufnr, new_id, text)
-					end
-				else
-					local active_mark = marks[1][1]
-					bridge.submit(util.JobType.PARSE_LINE, bufnr, active_mark, text)
-					for j = 2, #marks do
-						bridge.submit(util.JobType.PARSE_LINE, bufnr, marks[j][1], '')
-					end
-				end
+			for mark in pairs(state.retired) do
+				bridge.submit(util.JobType.PARSE_LINE, bufnr, mark, '')
 			end
 
-			-- marks have been pushed to EOF, mark them as blank
-			local eof_marks = vim.api.nvim_buf_get_extmarks(
-				bufnr, util.ns_track, {total_lines, 0}, {-1, -1}, {}
-			)
-			for _, mark in ipairs(eof_marks) do
-				bridge.submit(util.JobType.PARSE_LINE, bufnr, mark[1], '')
+			for row, stmt in ipairs(graph.doc:records()) do
+				if not stmt.mark then
+					local mark = vim.api.nvim_buf_set_extmark(
+						bufnr,
+						util.ns_track,
+						row - 1,
+						0,
+						{}
+					)
+					graph.doc:set_mark(stmt, mark)
+					bridge.submit(util.JobType.PARSE_LINE, bufnr, mark, stmt.text)
+				end
 			end
 		elseif graph then
 			graph.needs_initialization = true
@@ -136,8 +121,7 @@ end
 local function on_lines(_, bufnr, _, first_lnum, old_last_lnum, new_last_lnum)
 	local graph = M.graphs[bufnr]
 	if not graph then return true end
-
-	graph.doc:apply_edit(first_lnum, old_last_lnum, new_last_lnum)
+	local removed = graph.doc:apply_edit(first_lnum, old_last_lnum, new_last_lnum)
 
 	if not M.is_active(bufnr) then
 		graph.needs_initialization = true
@@ -145,13 +129,12 @@ local function on_lines(_, bufnr, _, first_lnum, old_last_lnum, new_last_lnum)
 		return
 	end
 
-	-- accumulate affected ranges during the edit block
-	local state = dirty_bufs[bufnr] or {
-		min_lnum = first_lnum,
-		max_lnum = new_last_lnum,
-	}
-	state.min_lnum = math.min(state.min_lnum, first_lnum)
-	state.max_lnum = math.max(state.max_lnum, new_last_lnum)
+	local state = dirty_bufs[bufnr] or { retired = {} }
+	for _, statement in ipairs(removed) do
+		if statement.mark then
+			state.retired[statement.mark] = true
+		end
+	end
 	dirty_bufs[bufnr] = state
 
 	-- if this is the first edit of the block, schedule the flush
@@ -252,6 +235,11 @@ util.connect_signal('parse_done', function(bufnr, extmark, out_syms, in_syms, no
 
 	for _, sym in ipairs(deleted_syms) do
 		require('qalc.bridge').submit(util.JobType.DELETE_SYM, bufnr, extmark, sym)
+	end
+
+	if not graph.doc:get_by_mark(extmark) then
+		util.emit_signal('result_cleared', bufnr, extmark)
+		vim.api.nvim_buf_del_extmark(bufnr, util.ns_track, extmark)
 	end
 
 	local dispatch = require('qalc.dispatch')

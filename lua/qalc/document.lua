@@ -18,10 +18,11 @@ function M.new(lines)
 	next_doc_id = next_doc_id + 1
 
 	local self = setmetatable({
-		document_id = next_doc_id,
+		doc_id = next_doc_id,
 		generation = 0,
 		lines = {},
 		by_id = {},
+		by_mark = {},
 	}, M)
 
 	for _, text in ipairs(lines) do
@@ -41,6 +42,15 @@ function M:get(id)
 	return self.by_id[id]
 end
 
+function M:get_by_mark(mark)
+	return self.by_mark[mark]
+end
+
+function M:set_mark(stmt, mark)
+	stmt.mark = mark
+	self.by_mark[mark] = stmt
+end
+
 function M:apply_edit(first_lnum, old_last_lnum, new_last_lnum)
 	assert(first_lnum >= 0 and first_lnum <= old_last_lnum, 'invalid old line range')
 	assert(old_last_lnum <= #self.lines, 'old line range exceeds document')
@@ -58,6 +68,9 @@ function M:apply_edit(first_lnum, old_last_lnum, new_last_lnum)
 		local stmt = self.lines[i]
 		removed[#removed+1] = stmt
 		self.by_id[stmt.id] = nil
+		if stmt.mark then
+			self.by_mark[stmt.mark] = nil
+		end
 	end
 
 	for _ = first_lnum + 1, new_last_lnum do
