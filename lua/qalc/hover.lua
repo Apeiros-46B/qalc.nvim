@@ -15,13 +15,18 @@ function M.show(bufnr)
 
 	local lines = {}
 
-	local graph = require('qalc.buffer').attached_bufs[bufnr]
+	local graph = require('qalc.buffer').graphs[bufnr]
 	if graph and graph.extmarks and graph.extmarks[word] then
 		-- local symbol lookup
-		local extmark_id = graph.extmarks[word]
+		local stmt = graph.doc:get(graph.extmarks[word])
 		lines[#lines+1] = '**' .. word .. ':** Local Symbol'
 
-		local pos = vim.api.nvim_buf_get_extmark_by_id(bufnr, util.ns_track, extmark_id, {})
+		local pos = stmt and vim.api.nvim_buf_get_extmark_by_id(
+			bufnr,
+			util.ns_track,
+			stmt.mark,
+			{}
+		)
 		if pos and pos[1] then
 			local lnum = pos[1]
 			local line_text = vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1]

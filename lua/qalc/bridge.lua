@@ -185,7 +185,11 @@ function M.register_callback(attached_bufs)
 		if not vim.api.nvim_buf_is_valid(bufnr) then return end
 
 		if type == util.JobType.EVAL_LINE then
-			util.emit_signal('eval_done', bufnr, extmark, output, diags)
+			local graph = attached_bufs[bufnr]
+			local stmt = graph and graph.doc:get(extmark)
+			if stmt then
+				util.emit_signal('eval_done', bufnr, stmt.mark, output, diags)
+			end
 		elseif type == util.JobType.PARSE_LINE then
 			util.emit_signal(
 				'parse_done',

@@ -12,15 +12,15 @@ function M.new(bufnr, lines)
 	self.bufnr = bufnr
 	self.doc = require('qalc.document').new(lines)
 
-	-- extmark_id -> { out_syms, in_syms, norm_expr }
+	-- stmt_id -> { out_syms, in_syms, norm_expr }
 	self.nodes = {}
 
-	-- symbol -> extmark_id
+	-- symbol -> stmt_id
 	self.extmarks = {}
 
 	-- track nodes with errors so when we get a result back from C++ we ignore it
-	self.had_cycle_error = {} -- extmark_id -> bool
-	self.duplicate_syms = {} -- extmark_id -> array[string]
+	self.had_cycle_error = {} -- stmt_id -> bool
+	self.duplicate_syms = {} -- stmt_id -> array[string]
 
 	return self
 end
@@ -286,9 +286,7 @@ function M:get_full_sort()
 
 	local target_nodes = {}
 	for _, stmt in ipairs(self.doc:records()) do
-		if stmt.mark then
-			target_nodes[stmt.mark] = true
-		end
+		target_nodes[stmt.id] = true
 	end
 
 	local cascade, cyclic_nodes = self:_topo_sort(adj, target_nodes)

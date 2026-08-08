@@ -9,7 +9,7 @@ M.graphs = {}
 
 local cur_active_buf = nil
 
--- bufnr -> { retired = { mark_id -> bool } }
+-- bufnr -> { retired = { stmt_id -> stmt } }
 local dirty_bufs = {}
 local flush_scheduled = false
 
@@ -68,7 +68,7 @@ function M.hard_reset(bufnr)
 
 		if stmt.text:gsub(util.comment_pat, ''):match('%S') then
 			graph.pending_parses = graph.pending_parses + 1
-			bridge.submit(util.JobType.PARSE_LINE, bufnr, id, stmt.text)
+			bridge.submit(util.JobType.PARSE_LINE, bufnr, stmt.id, stmt.text)
 		end
 	end
 
@@ -93,8 +93,26 @@ local function flush_dirty_bufs()
 			local doc_lines = vim.api.nvim_buf_get_lines(bufnr, 0, total_lines, false)
 			graph.doc:settle(doc_lines)
 
-			for mark in pairs(state.retired) do
-				bridge.submit(util.JobType.PARSE_LINE, bufnr, mark, '')
+			for stmt_id, stmt in pairs(state.retired) do
+				local deleted_syms, broken_dependents = graph:update_node(stmt_id, {}, {}, '')
+				for _, sym in ipairs(deleted_syms) do
+					bridge.submit(util.JobType.DELETE_SYM, bufnr, stmt_id, sym)
+				end
+
+				require('qalc.output').clear(bufnr, stmt.mark)
+				vim.api.nvim_buf_del_extmark(bufnr, util.ns_track, stmt.mark)
+
+				local cascade, cycle_diags, dup_diags = graph:get_cascade(
+					stmt_id,
+					broken_dependents
+				)
+				require('qalc.dispatch').run_cascade(
+					bufnr,
+					graph,
+					cascade,
+					cycle_diags,
+					dup_diags
+				)
 			end
 
 			for row, stmt in ipairs(graph.doc:records()) do
@@ -107,7 +125,7 @@ local function flush_dirty_bufs()
 						{}
 					)
 					graph.doc:set_mark(stmt, mark)
-					bridge.submit(util.JobType.PARSE_LINE, bufnr, mark, stmt.text)
+					bridge.submit(util.JobType.PARSE_LINE, bufnr, stmt.id, stmt.text)
 				end
 			end
 		elseif graph then
@@ -130,9 +148,9 @@ local function on_lines(_, bufnr, _, first_lnum, old_last_lnum, new_last_lnum)
 	end
 
 	local state = dirty_bufs[bufnr] or { retired = {} }
-	for _, statement in ipairs(removed) do
-		if statement.mark then
-			state.retired[statement.mark] = true
+	for _, stmt in ipairs(removed) do
+		if stmt.mark then
+			state.retired[stmt.id] = stmt
 		end
 	end
 	dirty_bufs[bufnr] = state
@@ -215,31 +233,24 @@ function M.get_graph(bufnr)
 	return M.graphs[bufnr]
 end
 
-util.connect_signal('parse_done', function(bufnr, extmark, out_syms, in_syms, norm_expr)
+util.connect_signal('parse_done', function(bufnr, stmt_id, out_syms, in_syms, norm_expr)
 	local graph = M.graphs[bufnr]
 	if not graph then return end
 	if not M.is_active(bufnr) then
 		graph.needs_initialization = true
 		return
 	end
-	if #vim.api.nvim_buf_get_extmark_by_id(bufnr, util.ns_track, extmark, {}) == 0 then
-		return
-	end
+	if not graph.doc:get(stmt_id) then return end
 
 	local deleted_syms, broken_dependents = graph:update_node(
-		extmark,
+		stmt_id,
 		out_syms,
 		in_syms,
 		norm_expr
 	)
 
 	for _, sym in ipairs(deleted_syms) do
-		require('qalc.bridge').submit(util.JobType.DELETE_SYM, bufnr, extmark, sym)
-	end
-
-	if not graph.doc:get_by_mark(extmark) then
-		util.emit_signal('result_cleared', bufnr, extmark)
-		vim.api.nvim_buf_del_extmark(bufnr, util.ns_track, extmark)
+		require('qalc.bridge').submit(util.JobType.DELETE_SYM, bufnr, stmt_id, sym)
 	end
 
 	local dispatch = require('qalc.dispatch')
@@ -259,7 +270,7 @@ util.connect_signal('parse_done', function(bufnr, extmark, out_syms, in_syms, no
 		return
 	end
 
-	local cascade, cycle_diags, dup_diags = graph:get_cascade(extmark, broken_dependents)
+	local cascade, cycle_diags, dup_diags = graph:get_cascade(stmt_id, broken_dependents)
 	dispatch.run_cascade(bufnr, graph, cascade, cycle_diags, dup_diags)
 end)
 
