@@ -3,11 +3,12 @@ local util = require('qalc.util')
 local M = {}
 
 -- dispatch a cascade of evaluations, reporting cycles and duplicates
-function M.run_cascade(bufnr, graph, cascade, cycle_diags, dup_diags)
+function M.run_cascade(bufnr, state, cascade, cycle_diags, dup_diags)
+	local graph = state.graph
 	local pending_ids = {}
 
 	for _, id in ipairs(cascade) do
-		local stmt = graph.doc:get(id)
+		local stmt = state.doc:get(id)
 		if stmt and not (cycle_diags[id] or dup_diags[id]) then
 			pending_ids[#pending_ids+1] = stmt.mark
 		end
@@ -18,12 +19,12 @@ function M.run_cascade(bufnr, graph, cascade, cycle_diags, dup_diags)
 	end
 
 	for _, id in ipairs(cascade) do
-		local stmt = graph.doc:get(id)
+		local stmt = state.doc:get(id)
 		if cycle_diags and cycle_diags[id] then
 			if stmt then
 				util.emit_signal('diags_ready', bufnr, stmt.mark, cycle_diags[id])
 			end
-			M.clear_out_syms_for(bufnr, graph, id)
+			M.clear_out_syms_for(bufnr, state, id)
 		elseif dup_diags and dup_diags[id] then
 			if stmt then
 				util.emit_signal('diags_ready', bufnr, stmt.mark, dup_diags[id])
@@ -37,16 +38,17 @@ function M.run_cascade(bufnr, graph, cascade, cycle_diags, dup_diags)
 
 			-- ensure idempotency by deleting all possible output symbols first
 			-- makes global shadowing warning consistent and also prevents self-ref
-			M.clear_out_syms_for(bufnr, graph, id)
+			M.clear_out_syms_for(bufnr, state, id)
 			require('qalc.bridge').submit(util.JobType.EVAL_LINE, bufnr, id, expr)
 		end
 	end
 end
 
-function M.clear_out_syms_for(bufnr, graph, id)
+function M.clear_out_syms_for(bufnr, state, id)
+	local graph = state.graph
 	local node = graph.nodes[id]
-	if node and node.out_syms then
-		for _, def in ipairs(node.out_syms) do
+	if node and node.outputs then
+		for _, def in ipairs(node.outputs) do
 			require('qalc.bridge').submit(util.JobType.DELETE_SYM, bufnr, id, def.ref_name)
 		end
 	end
@@ -56,14 +58,14 @@ util.guard_signal('eval_done', function(bufnr, extmark, _, _)
 	local buffer = require('qalc.buffer')
 	if not buffer.is_active(bufnr) then return false end
 
-	local graph = buffer.get_graph(bufnr)
-	if not graph then return false end
+	local state = buffer.get_state(bufnr)
+	if not state or not state.graph then return false end
 
-	local stmt = graph.doc:get_by_mark(extmark)
+	local stmt = state.doc:get_by_mark(extmark)
 	if not stmt then return false end
 
-	-- don't allow results to propagate if cycle errors are present
-	if graph.had_cycle_error[stmt.id] then return false end
+	-- don't allow results to propagate if blocked
+	if state.graph.blocked[stmt.id] then return false end
 
 	return true
 end)

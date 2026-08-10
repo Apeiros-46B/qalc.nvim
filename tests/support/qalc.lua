@@ -16,10 +16,10 @@ function M.attach_lines(lines)
 	vim.cmd.QalcAttach()
 
 	local bufnr = vim.api.nvim_get_current_buf()
-	M.wait_for(function()
-		local graph = require('qalc.buffer').get_graph(bufnr)
-		return graph and graph.is_initializing == false
-	end, 'buffer did not finish initialization')
+	M.wait_for(
+		function() return require('qalc.buffer').is_ready(bufnr) end,
+		'buffer did not finish initialization'
+	)
 
 	return bufnr
 end

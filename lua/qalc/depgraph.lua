@@ -1,311 +1,155 @@
--- extmark-based dependency graph
+local Graph = {}
+Graph.__index = Graph
 
 local M = {}
-M.__index = M
 
----@param bufnr number The buffer this graph is attached to
-function M.new(bufnr, lines)
-	lines = lines or vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-
-	local self = setmetatable({}, M)
-
-	self.bufnr = bufnr
-	self.doc = require('qalc.document').new(lines)
-
-	-- stmt_id -> { out_syms, in_syms, norm_expr }
-	self.nodes = {}
-
-	-- symbol -> stmt_id
-	self.extmarks = {}
-
-	-- track nodes with errors so when we get a result back from C++ we ignore it
-	self.had_cycle_error = {} -- stmt_id -> bool
-	self.duplicate_syms = {} -- stmt_id -> array[string]
-
-	return self
-end
-
-function M:update_node(extmark, out_syms, in_syms, norm_expr)
-	local old = self.nodes[extmark] or { out_syms = {}, in_syms = {} }
-	local deleted_syms = {}
-	local duplicate_syms = {}
-
-	-- register new outputs and guard against duplicates
-	local new_outs_set = {}
-	local valid_out_syms = {}
-
-	for _, def in ipairs(out_syms) do
-		local sym = def.ref_name
-		local existing_owner = self.extmarks[sym]
-
-		if existing_owner and existing_owner ~= extmark then
-			duplicate_syms[#duplicate_syms+1] = sym
-		else
-			new_outs_set[sym] = true
-			valid_out_syms[#valid_out_syms+1] = def
-			self.extmarks[sym] = extmark
-		end
-	end
-
-	-- prevent self-reference "x = x + 1"
-	local clean_in_syms = {}
-
-	if in_syms then
-		for _, sym in ipairs(in_syms) do
-			if not new_outs_set[sym] then
-				clean_in_syms[#clean_in_syms+1] = sym
-			end
-		end
-	end
-
-	-- find outputs that no longer exist on this line
-	for _, def in ipairs(old.out_syms) do
-		local sym = def.ref_name
-
-		if not new_outs_set[sym] then
-			-- only clear the symbol->extmark entry if this line was the one providing it
-			if self.extmarks[sym] == extmark then
-				self.extmarks[sym] = nil
-			end
-			deleted_syms[#deleted_syms+1] = sym
-		end
-	end
-
-	-- find nodes whose dependencies were just deleted
-	local broken_dependents = {}
-
-	if #deleted_syms > 0 then
-		local deleted_syms_set = {}
-
-		for _, s in ipairs(deleted_syms) do
-			deleted_syms_set[s] = true
-		end
-
-		for id, node in pairs(self.nodes) do
-			if id ~= extmark then
-				for _, in_sym in ipairs(node.in_syms) do
-					if deleted_syms_set[in_sym] then
-						broken_dependents[#broken_dependents+1] = id
-						break
-					end
-				end
-			end
-		end
-	end
-
-	if #duplicate_syms > 0 then
-		self.duplicate_syms[extmark] = duplicate_syms
-	else
-		self.duplicate_syms[extmark] = nil
-	end
-
-	if #valid_out_syms == 0 and #in_syms == 0 and (not norm_expr or norm_expr == '') then
-		self.nodes[extmark] = nil
-	else
-		self.nodes[extmark] = {
-			out_syms = valid_out_syms,
-			in_syms = clean_in_syms,
-			norm_expr = norm_expr,
-		}
-	end
-
-	return deleted_syms, broken_dependents
-end
-
--- build adjacency list for entire buf
-function M:_build_adj()
-	local adj = {}
-
-	for id in pairs(self.nodes) do
-		adj[id] = {}
-	end
-
-	for id, node in pairs(self.nodes) do
-		local seen_deps = {}
-		for _, in_sym in ipairs(node.in_syms) do
-			local provider = self.extmarks[in_sym]
-			-- avoid self-loops and duplicate edges
-			if provider and provider ~= id and not seen_deps[provider] then
-				seen_deps[provider] = true
-				local t = adj[provider]
-				if t then
-					t[#t+1] = id
-				end
-			end
-		end
-	end
-
-	return adj
-end
-
--- topological sort on a specific subset of nodes (Kahn's algorithm)
--- returns the sorted cascade array and array of nodes in cycles
-function M:_topo_sort(adj, target_nodes)
-	-- calculate in-degrees for the affected subgraph
-	local sub_in_degree = {}
-
-	for u in pairs(target_nodes) do
-		sub_in_degree[u] = 0
-	end
-	for u in pairs(target_nodes) do
-		for _, v in ipairs(adj[u] or {}) do
-			if target_nodes[v] then
-				sub_in_degree[v] = sub_in_degree[v] + 1
-			end
-		end
-	end
-
-	local zero_in = {}
-
-	for id, deg in pairs(sub_in_degree) do
-		if deg == 0 then
-			zero_in[#zero_in+1] = id
-		end
-	end
-
-	local cascade = {}
-
-	local processed = 0
-	local head = 1
-	while head <= #zero_in do
-		local u = zero_in[head]
-		head = head + 1
-		cascade[#cascade+1] = u
-		processed = processed + 1
-
-		for _, v in ipairs(adj[u] or {}) do
-			if target_nodes[v] then
-				sub_in_degree[v] = sub_in_degree[v] - 1
-				if sub_in_degree[v] == 0 then
-					zero_in[#zero_in+1] = v
-				end
-			end
-		end
-	end
-
-	-- detect cycles
-	local cyclic_nodes = {}
-	local expected_count = 0
-	for _ in pairs(target_nodes) do
-		expected_count = expected_count + 1
-	end
-
-	if processed < expected_count then
-		-- any node with a remaining in-degree > 0 is in a cycle
-		for id in pairs(target_nodes) do
-			if sub_in_degree[id] > 0 then
-				cyclic_nodes[#cyclic_nodes+1] = id
-				-- add to the cascade the callback sees the diagnostic and skips eval
-				cascade[#cascade+1] = id
-			end
-		end
-	end
-
-	return cascade, cyclic_nodes
-end
-
-function M:_process_cycle_errors(cyclic_nodes)
+local function dup_diags(syms)
 	local diags = {}
 
-	for _, id in ipairs(cyclic_nodes) do
-		self.had_cycle_error[id] = true
-		diags[id] = {{
-			message = 'Reference cycle found here or in dependents, cannot evaluate',
-			severity = vim.diagnostic.severity.ERROR
-		}}
+	for _, sym in ipairs(syms) do
+		diags[#diags+1] = {
+			message = 'Duplicate definition: "' .. sym .. '" is already defined.',
+			severity = vim.diagnostic.severity.ERROR,
+		}
 	end
 
 	return diags
 end
 
-function M:_process_duplicate_errors(target_nodes)
-	local dup_diags = {}
+local function cycle_diag()
+	return {{
+		message = 'Reference cycle found here or in dependents, cannot evaluate',
+		severity = vim.diagnostic.severity.ERROR,
+	}}
+end
 
-	for id in pairs(target_nodes) do
-		local syms = self.duplicate_syms[id]
-		if syms and #syms > 0 then
-			local diags = {}
-			for _, sym in ipairs(syms) do
-				diags[#diags+1] = {
-					message = 'Duplicate definition: "' .. sym .. '" is already defined.',
-					severity = vim.diagnostic.severity.ERROR
-				}
+function M.build(stmts)
+	local graph = setmetatable({
+		nodes = {},
+		owners = {},
+		dependencies = {},
+		dependents = {},
+		providers = {},
+		dup_diags = {},
+		cycle_diags = {},
+		blocked = {},
+		ord = {},
+		stmt_ord = {},
+	}, Graph)
+
+	for _, stmt in ipairs(stmts) do
+		local parsed = stmt.parsed
+		if parsed and not parsed.skip then
+			local node = {
+				stmt = stmt,
+				decl_outputs = parsed.out_syms or {},
+				outputs = {},
+				in_syms = {},
+				norm_expr = parsed.norm_expr,
+			}
+			local dup_syms = {}
+			local seen_out_syms = {}
+
+			for _, def in ipairs(node.decl_outputs) do
+				local sym = def.ref_name
+				if not seen_out_syms[sym] then
+					seen_out_syms[sym] = true
+					if graph.owners[sym] then
+						dup_syms[#dup_syms+1] = sym
+					end
+				end
 			end
-			dup_diags[id] = diags
+
+			if #dup_syms == 0 then
+				node.outputs = node.decl_outputs
+				for _, def in ipairs(node.outputs) do
+					graph.owners[def.ref_name] = stmt.id
+				end
+			else
+				graph.dup_diags[stmt.id] = dup_diags(
+					dup_syms
+				)
+			end
+
+			graph.nodes[stmt.id] = node
+			graph.dependencies[stmt.id] = {}
+			graph.dependents[stmt.id] = {}
+			graph.providers[stmt.id] = {}
+			graph.stmt_ord[#graph.stmt_ord+1] = stmt.id
 		end
 	end
 
-	return dup_diags
-end
+	for _, id in ipairs(graph.stmt_ord) do
+		local node = graph.nodes[id]
+		local own_symbols = {}
+		local seen_in_syms = {}
 
-function M:get_cascade(start_extmark, broken_dependents)
-	local adj = self:_build_adj()
+		for _, def in ipairs(node.decl_outputs) do
+			own_symbols[def.ref_name] = true
+		end
 
-	-- BFS to find only the descendants of the start and broken nodes
-	local affected = { [start_extmark] = true }
-	local visited = { [start_extmark] = true }
-	local queue = { start_extmark }
+		for _, sym in ipairs(node.stmt.parsed.in_syms or {}) do
+			if not own_symbols[sym] and not seen_in_syms[sym] then
+				seen_in_syms[sym] = true
+				node.in_syms[#node.in_syms+1] = sym
 
-	-- manually seed broken dependents into BFS queue
-	for _, broken_id in ipairs(broken_dependents or {}) do
-		if not visited[broken_id] then
-			visited[broken_id] = true
-			affected[broken_id] = true
-			queue[#queue+1] = broken_id
+				local provider = graph.owners[sym]
+				graph.providers[id][sym] = provider or false
+				if provider and provider ~= id and not graph.dependencies[id][provider] then
+					graph.dependencies[id][provider] = true
+					graph.dependents[provider][#graph.dependents[provider]+1] = id
+				end
+			end
+		end
+	end
+
+	local in_deg = {}
+	local ready = {}
+
+	for _, id in ipairs(graph.stmt_ord) do
+		local count = 0
+		for _ in pairs(graph.dependencies[id]) do
+			count = count + 1
+		end
+		in_deg[id] = count
+		if count == 0 then
+			ready[#ready+1] = id
 		end
 	end
 
 	local head = 1
-	while head <= #queue do
-		local curr = queue[head]
+	while head <= #ready do
+		local id = ready[head]
 		head = head + 1
-		for _, child in ipairs(adj[curr] or {}) do
-			if not visited[child] then
-				visited[child] = true
-				affected[child] = true
-				queue[#queue+1] = child
+		graph.ord[#graph.ord+1] = id
+
+		for _, dependent in ipairs(graph.dependents[id]) do
+			in_deg[dependent] = in_deg[dependent] - 1
+			if in_deg[dependent] == 0 then
+				ready[#ready+1] = dependent
 			end
 		end
 	end
 
-	-- topologically sort the affected subgraph
-	local cascade, cyclic_nodes = self:_topo_sort(adj, affected)
-
-	for id in pairs(affected) do
-		self.had_cycle_error[id] = nil
-	end
-	local cycle_diags = self:_process_cycle_errors(cyclic_nodes)
-	local duplicate_diags = self:_process_duplicate_errors(affected)
-
-	return cascade, cycle_diags, duplicate_diags
-end
-
--- build the graph on initial load
-function M:get_full_sort()
-	local adj = self:_build_adj()
-
-	local target_nodes = {}
-	for _, stmt in ipairs(self.doc:records()) do
-		target_nodes[stmt.id] = true
+	if #graph.ord < #graph.stmt_ord then
+		for _, id in ipairs(graph.stmt_ord) do
+			if in_deg[id] > 0 then
+				graph.blocked[id] = true
+				graph.cycle_diags[id] = cycle_diag()
+				graph.ord[#graph.ord+1] = id
+			end
+		end
 	end
 
-	local cascade, cyclic_nodes = self:_topo_sort(adj, target_nodes)
-
-	self.had_cycle_error = {}
-	local cycle_diags = self:_process_cycle_errors(cyclic_nodes)
-	local dup_diags = self:_process_duplicate_errors(target_nodes)
-
-	return cascade, cycle_diags, dup_diags
+	return graph
 end
 
 -- for def in graph:definitions() do ... end
-function M:definitions()
+function Graph:definitions()
 	return coroutine.wrap(function()
-		for _, node in pairs(self.nodes) do
-			if node.out_syms then
-				for _, def in ipairs(node.out_syms) do
-					coroutine.yield(def)
-				end
+		for _, id in ipairs(self.stmt_ord) do
+			for _, def in ipairs(self.nodes[id].outputs) do
+				coroutine.yield(def)
 			end
 		end
 	end)
