@@ -23,6 +23,16 @@ local function cycle_diag()
 	}}
 end
 
+local function maps_equal(left, right)
+	for key, value in pairs(left or {}) do
+		if not right or right[key] ~= value then return false end
+	end
+	for key, value in pairs(right or {}) do
+		if not left or left[key] ~= value then return false end
+	end
+	return true
+end
+
 function M.build(stmts)
 	local graph = setmetatable({
 		nodes = {},
@@ -142,6 +152,79 @@ function M.build(stmts)
 	end
 
 	return graph
+end
+
+function M.plan(graph, committed, force_all)
+	local affected = {}
+
+	if not committed or force_all then
+		for _, id in ipairs(graph.stmt_ord) do
+			affected[id] = true
+		end
+	else
+		for _, id in ipairs(graph.stmt_ord) do
+			local is_new = not committed.nodes[id]
+			local providers_changed = not maps_equal(
+				graph.providers[id],
+				committed.providers[id]
+			)
+			local dup_changed = (not not graph.dup_diags[id])
+				~= (not not committed.dup_diags[id])
+			local blocked_changed = (not not graph.blocked[id])
+				~= (not not committed.blocked[id])
+
+			if is_new or providers_changed or dup_changed or blocked_changed then
+				affected[id] = true
+			end
+		end
+	end
+
+	local queue = {}
+	for _, id in ipairs(graph.stmt_ord) do
+		if affected[id] then queue[#queue+1] = id end
+	end
+
+	local head = 1
+	while head <= #queue do
+		local id = queue[head]
+		head = head + 1
+
+		for _, dependent in ipairs(graph.dependents[id]) do
+			if not affected[dependent] then
+				affected[dependent] = true
+				queue[#queue+1] = dependent
+			end
+		end
+	end
+
+	local deletions = {}
+	if committed then
+		for sym, old_owner in pairs(committed.owners) do
+			if graph.owners[sym] ~= old_owner then
+				deletions[sym] = true
+			end
+		end
+	end
+
+	for id in pairs(affected) do
+		local node = graph.nodes[id]
+		for _, definition in ipairs(node.outputs) do
+			deletions[definition.ref_name] = true
+		end
+	end
+
+	local eval_ord = {}
+	for _, id in ipairs(graph.ord) do
+		if affected[id] and not graph.blocked[id] and not graph.dup_diags[id] then
+			eval_ord[#eval_ord+1] = id
+		end
+	end
+
+	return {
+		affected = affected,
+		deletions = deletions,
+		eval_ord = eval_ord,
+	}
 end
 
 -- for def in graph:definitions() do ... end

@@ -203,8 +203,6 @@ util.connect_signal('eval_started', function(bufnr, ids)
 	vim.cmd('redraw!')
 end)
 
-util.connect_signal('eval_done', M.render)
-
 -- in case of ghost, clear the output and stale diagnostics
 -- this is safe and will never drop the result for the active mark
 util.connect_signal('result_cleared', M.clear)

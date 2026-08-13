@@ -37,14 +37,13 @@ function M.submit(type, bufnr, extmark, payload)
 
 	if type == util.JobType.EVAL_LINE then
 		if is_forbidden then
-			util.emit_signal('diags_ready', bufnr, extmark, {{
+			util.emit_signal('eval_done', bufnr, extmark, '', {{
 				message = 'Legacy "function" syntax disabled. Use f(x) := ...',
 				severity = vim.diagnostic.severity.ERROR,
 			}})
 			return
 		elseif is_blank then
-			-- clear stale results for blank lines
-			util.emit_signal('result_cleared', bufnr, extmark)
+			util.emit_signal('eval_done', bufnr, extmark, '', {})
 			return
 		end
 	elseif type == util.JobType.PARSE_LINE then
@@ -181,24 +180,10 @@ function M.register_callback(attached_bufs)
 		defs,
 		norm_expr
 	)
-		-- buffer might have been closed while C++ was working
-		if not vim.api.nvim_buf_is_valid(bufnr) then return end
-
 		if type == util.JobType.EVAL_LINE then
-			local state = attached_bufs[bufnr]
-			local stmt = state and state.doc:get(extmark)
-			if stmt then
-				util.emit_signal('eval_done', bufnr, stmt.mark, output, diags)
-			end
+			util.emit_signal('eval_done', bufnr, extmark, output, diags)
 		elseif type == util.JobType.PARSE_LINE then
-			util.emit_signal(
-				'parse_done',
-				bufnr,
-				extmark,
-				out_syms,
-				in_syms,
-				norm_expr
-			)
+			util.emit_signal('parse_done', bufnr, extmark, out_syms, in_syms, norm_expr)
 		elseif type == util.JobType.GET_DEFS then
 			handle_get_defs(attached_bufs, defs)
 		end
