@@ -48,9 +48,10 @@ local function submit_parse(state, stmt)
 	)
 end
 
-local function has_timeout(diagnostics)
-	for _, diagnostic in ipairs(diagnostics or {}) do
-		if diagnostic.message == 'Calculation took too long'
+local function has_timeout(diags)
+	for _, diagnostic in ipairs(diags or {}) do
+		if
+			diagnostic.message == 'Calculation took too long'
 			or diagnostic.message == 'Dependent calculation took too long'
 		then
 			return true
@@ -59,13 +60,26 @@ local function has_timeout(diagnostics)
 	return false
 end
 
-local start_evaluation
+local start_eval
 
-local function finish_evaluation(complete)
+local function finish_eval(complete)
 	local finished = eval_inflight
 	if not finished then return end
 	if finished.state.doc.generation ~= finished.generation then
 		finished.state.needs_refresh = true
+	elseif M.attached_bufs[finished.state.bufnr] == finished.state then
+		local updates = {}
+		for _, result in ipairs(finished.results) do
+			local stmt = finished.state.doc:get(result.stmt_id)
+			if stmt then
+				updates[#updates+1] = {
+					mark = stmt.mark,
+					output = result.output,
+					diags = result.diags,
+				}
+			end
+		end
+		require('qalc.output').render_batch(finished.state.bufnr, updates)
 	end
 
 	if complete then
@@ -82,47 +96,37 @@ local function finish_evaluation(complete)
 	local pending = pending_eval
 	pending_eval = nil
 	if pending and M.is_active(pending.state.bufnr) then
-		start_evaluation(pending.state, pending.graph)
+		start_eval(pending.state, pending.graph)
 	end
 end
 
-local function handle_eval_result(bufnr, statement_id, output, diagnostics)
+local function handle_eval_result(bufnr, stmt_id, output, diags)
 	local inflight = eval_inflight
 	if not inflight or inflight.state.bufnr ~= bufnr then return end
-	if not inflight.pending[statement_id] then return end
+	if not inflight.pending[stmt_id] then return end
 
-	inflight.pending[statement_id] = nil
+	inflight.pending[stmt_id] = nil
 	inflight.pending_count = inflight.pending_count - 1
-	if has_timeout(diagnostics) then
-		inflight.complete = false
-	end
+	if has_timeout(diags) then inflight.complete = false end
 
-	local state = M.attached_bufs[bufnr]
-	if state == inflight.state and state.doc.generation == inflight.generation then
-		local statement = state.doc:get(statement_id)
-		if statement then
-			require('qalc.output').render(
-				bufnr,
-				statement.mark,
-				output,
-				diagnostics
-			)
-		end
-	end
+	inflight.results[#inflight.results+1] = {
+		stmt_id = stmt_id,
+		output = output,
+		diags = diags,
+	}
 
 	if inflight.pending_count == 0 then
-		finish_evaluation(inflight.complete)
+		finish_eval(inflight.complete)
 	end
 end
 
-start_evaluation = function(state, graph)
+start_eval = function(state, graph)
 	local reset = not calculator_valid or committed_bufnr ~= state.bufnr
 	local base = reset and nil or committed_graph
 	local plan = Depgraph.plan(graph, base, state.needs_refresh)
-	local bridge = require('qalc.bridge')
-	local output = require('qalc.output')
 	state.needs_refresh = false
 
+	local bridge = require('qalc.bridge')
 	if reset then
 		bridge.submit(util.JobType.CLEAR_SYMS, state.bufnr, -1, '')
 	else
@@ -133,59 +137,57 @@ start_evaluation = function(state, graph)
 		end
 	end
 
-	local pending_marks = {}
 	local pending = {}
 	for _, id in ipairs(plan.eval_ord) do
-		local statement = state.doc:get(id)
-		if statement then
-			pending[id] = true
-			pending_marks[#pending_marks+1] = statement.mark
-		end
-	end
-	if #pending_marks > 0 then
-		util.emit_signal('eval_started', state.bufnr, pending_marks)
+		pending[id] = true
 	end
 
+	local display_updates = {}
 	for id in pairs(plan.affected) do
-		local statement = state.doc:get(id)
-		if statement then
-			local diagnostics = graph.cycle_diags[id] or graph.dup_diags[id]
-			if diagnostics then
-				output.render(state.bufnr, statement.mark, '', diagnostics)
-			end
+		local stmt = state.doc:get(id)
+		if stmt then
+			local diags = graph.cycle_diags[id] or graph.dup_diags[id]
+			display_updates[#display_updates+1] = {
+				mark = stmt.mark,
+				diags = diags or {},
+				placeholder = pending[id] == true,
+			}
 		end
 	end
+
+	require('qalc.output').render_batch(state.bufnr, display_updates)
 
 	eval_inflight = {
 		state = state,
 		graph = graph,
 		generation = state.doc.generation,
 		pending = pending,
-		pending_count = #pending_marks,
+		pending_count = #plan.eval_ord,
+		results = {},
 		complete = true,
 	}
 
 	for _, id in ipairs(plan.eval_ord) do
-		local statement = state.doc:get(id)
-		if statement then
+		local stmt = state.doc:get(id)
+		if stmt then
 			local expression = graph.nodes[id].norm_expr
 			if not expression or expression == '' then
-				expression = statement.text
+				expression = stmt.text
 			end
 			bridge.submit(util.JobType.EVAL_LINE, state.bufnr, id, expression)
 		end
 	end
 
 	if eval_inflight and eval_inflight.pending_count == 0 then
-		finish_evaluation(true)
+		finish_eval(true)
 	end
 end
 
-local function request_evaluation(state, graph)
+local function request_eval(state, graph)
 	if eval_inflight then
 		pending_eval = { state = state, graph = graph }
 	else
-		start_evaluation(state, graph)
+		start_eval(state, graph)
 	end
 end
 
@@ -199,7 +201,7 @@ local function rebuild(state)
 	state.graph = Depgraph.build(state.doc:records())
 	state.is_initializing = false
 
-	request_evaluation(state, state.graph)
+	request_eval(state, state.graph)
 end
 
 function M.new_buf(name)
@@ -271,10 +273,15 @@ local function flush_dirty_bufs()
 		then
 			state.doc:settle(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
 
+			local retired_updates = {}
 			for _, stmt in pairs(dirty.retired) do
-				require('qalc.output').clear(bufnr, stmt.mark)
+				retired_updates[#retired_updates+1] = {
+					mark = stmt.mark,
+					diags = {},
+				}
 				vim.api.nvim_buf_del_extmark(bufnr, util.ns_track, stmt.mark)
 			end
+			require('qalc.output').render_batch(bufnr, retired_updates)
 
 			for i, stmt in ipairs(state.doc:records()) do
 				if not stmt.mark then
@@ -378,7 +385,7 @@ function M.focus_buffer(bufnr)
 		return
 	end
 
-	request_evaluation(state, state.graph)
+	request_eval(state, state.graph)
 end
 
 function M.get_state(bufnr)

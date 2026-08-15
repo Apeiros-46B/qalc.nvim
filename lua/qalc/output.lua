@@ -42,28 +42,6 @@ local function flush_diags(bufnr)
 	vim.diagnostic.set(util.ns_ui, bufnr, all_diags)
 end
 
--- clear one extmark from the cache
--- if show_placeholder is true, show a placeholder until the mark is updated again
-function M.clear(bufnr, tracking_mark, show_placeholder, no_redraw)
-	if result_cache[bufnr] then
-		if show_placeholder and cfg.display.placeholder then
-			result_cache[bufnr][tracking_mark] = cfg.display.placeholder
-		else
-			result_cache[bufnr][tracking_mark] = nil
-		end
-	end
-
-	if diag_cache[bufnr] and diag_cache[bufnr][tracking_mark] then
-		diag_cache[bufnr][tracking_mark] = nil
-		flush_diags(bufnr)
-	end
-
-	if not no_redraw then
-		-- force repaint, which erases ephemeral text (see decoration provider below)
-		vim.cmd('redraw!')
-	end
-end
-
 -- clear all extmarks
 function M.clear_all(bufnr)
 	result_cache[bufnr] = nil
@@ -75,10 +53,7 @@ function M.clear_all(bufnr)
 	end
 end
 
--- update the cache for one extmark
-function M.render(bufnr, tracking_mark, output, diags)
-	result_cache[bufnr] = result_cache[bufnr] or {}
-
+local function should_show_result(bufnr, tracking_mark, output)
 	local should_show = false
 
 	-- check output against input to avoid redundant outputs like "x = 5 = 5"
@@ -105,22 +80,53 @@ function M.render(bufnr, tracking_mark, output, diags)
 			end
 		end
 	end
+	return should_show
+end
 
-	if should_show then
-		result_cache[bufnr][tracking_mark] = output
-	else
-		result_cache[bufnr][tracking_mark] = nil
-	end
-
+function M.render_batch(bufnr, updates, no_redraw)
+	if #updates == 0 then return end
+	result_cache[bufnr] = result_cache[bufnr] or {}
 	diag_cache[bufnr] = diag_cache[bufnr] or {}
-	if diags and #diags > 0 then
-		diag_cache[bufnr][tracking_mark] = diags
-	else
-		diag_cache[bufnr][tracking_mark] = nil
+
+	for _, update in ipairs(updates) do
+		local tracking_mark = update.mark
+		if update.placeholder and cfg.display.placeholder then
+			result_cache[bufnr][tracking_mark] = cfg.display.placeholder
+		elseif should_show_result(bufnr, tracking_mark, update.output) then
+			result_cache[bufnr][tracking_mark] = update.output
+		else
+			result_cache[bufnr][tracking_mark] = nil
+		end
+
+		local diags = update.diags
+		if diags and #diags > 0 then
+			diag_cache[bufnr][tracking_mark] = diags
+		else
+			diag_cache[bufnr][tracking_mark] = nil
+		end
 	end
 
 	flush_diags(bufnr)
-	vim.cmd('redraw!')
+	if not no_redraw then vim.cmd('redraw!') end
+end
+
+-- clear one extmark from the cache
+-- if show_placeholder is true, show a placeholder until the mark is updated again
+function M.clear(bufnr, tracking_mark, show_placeholder, no_redraw)
+	M.render_batch(bufnr, {{
+		mark = tracking_mark,
+		diags = {},
+		placeholder = show_placeholder,
+	}}, no_redraw)
+end
+
+-- update the cache for one extmark
+function M.render(bufnr, tracking_mark, output, diags)
+	M.render_batch(bufnr, {{
+		mark = tracking_mark,
+		output = output,
+		diags = diags,
+	}})
 end
 
 -- yank result at current line in the given buf into the given register
@@ -192,16 +198,6 @@ vim.api.nvim_set_decoration_provider(util.ns_ui, {
 		end
 	end
 })
-
--- batch update placeholders when evaluation starts
-util.connect_signal('eval_started', function(bufnr, ids)
-	for _, id in ipairs(ids) do
-		-- show_placeholder = true
-		-- no_redraw = true
-		M.clear(bufnr, id, true, true)
-	end
-	vim.cmd('redraw!')
-end)
 
 -- in case of ghost, clear the output and stale diagnostics
 -- this is safe and will never drop the result for the active mark
