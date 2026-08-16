@@ -1,6 +1,5 @@
 -- show hover documentation
 local cfg = require('qalc.config').cfg
-local util = require('qalc.util')
 
 local M = {}
 
@@ -22,18 +21,8 @@ function M.show(bufnr)
 		local stmt = state.doc:get(graph.owners[word])
 		lines[#lines+1] = '**' .. word .. ':** Local Symbol'
 
-		local pos = stmt and vim.api.nvim_buf_get_extmark_by_id(
-			bufnr,
-			util.ns_track,
-			stmt.mark,
-			{}
-		)
-		if pos and pos[1] then
-			local lnum = pos[1]
-			local line_text = vim.api.nvim_buf_get_lines(bufnr, lnum, lnum + 1, false)[1]
-			if line_text then
-				lines[#lines+1] = '**Definition:** `' .. vim.trim(line_text) .. '`'
-			end
+		if stmt and stmt.text then
+			lines[#lines+1] = '**Definition:** `' .. vim.trim(stmt.text) .. '`'
 		end
 	else
 		-- fallback to globals

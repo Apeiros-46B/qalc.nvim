@@ -73,13 +73,13 @@ local function finish_eval(complete)
 			local stmt = finished.state.doc:get(result.stmt_id)
 			if stmt then
 				updates[#updates+1] = {
-					mark = stmt.mark,
+					stmt_id = stmt.id,
 					output = result.output,
 					diags = result.diags,
 				}
 			end
 		end
-		require('qalc.output').render_batch(finished.state.bufnr, updates)
+		require('qalc.output').render_batch(finished.state, updates)
 	end
 
 	if complete then
@@ -148,14 +148,14 @@ start_eval = function(state, graph)
 		if stmt then
 			local diags = graph.cycle_diags[id] or graph.dup_diags[id]
 			display_updates[#display_updates+1] = {
-				mark = stmt.mark,
+				stmt_id = stmt.id,
 				diags = diags or {},
 				placeholder = pending[id] == true,
 			}
 		end
 	end
 
-	require('qalc.output').render_batch(state.bufnr, display_updates)
+	require('qalc.output').render_batch(state, display_updates)
 
 	eval_inflight = {
 		state = state,
@@ -244,15 +244,12 @@ function M.hard_reset(bufnr)
 	bridge.register_callback(M.attached_bufs)
 
 	require('qalc.output').clear_all(bufnr)
-	vim.api.nvim_buf_clear_namespace(bufnr, util.ns_track, 0, -1)
 
 	local state = new_buf_state(bufnr)
 	state.needs_initialization = false
 	M.attached_bufs[bufnr] = state
 
-	for i, stmt in ipairs(state.doc:records()) do
-		local mark = vim.api.nvim_buf_set_extmark(bufnr, util.ns_track, i - 1, 0, {})
-		state.doc:set_mark(stmt, mark)
+	for _, stmt in ipairs(state.doc:records()) do
 		submit_parse(state, stmt)
 	end
 
@@ -263,7 +260,7 @@ local function flush_dirty_bufs()
 	-- runs when event loop is idle
 	flush_scheduled = false
 
-	for bufnr, dirty in pairs(dirty_bufs) do
+	for bufnr in pairs(dirty_bufs) do
 		local state = M.attached_bufs[bufnr]
 		if
 			vim.api.nvim_buf_is_valid(bufnr)
@@ -273,24 +270,13 @@ local function flush_dirty_bufs()
 		then
 			state.doc:settle(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
 
-			local retired_updates = {}
-			for _, stmt in pairs(dirty.retired) do
-				retired_updates[#retired_updates+1] = {
-					mark = stmt.mark,
-					diags = {},
-				}
-				vim.api.nvim_buf_del_extmark(bufnr, util.ns_track, stmt.mark)
-			end
-			require('qalc.output').render_batch(bufnr, retired_updates)
-
-			for i, stmt in ipairs(state.doc:records()) do
-				if not stmt.mark then
-					local mark = vim.api.nvim_buf_set_extmark(bufnr, util.ns_track, i - 1, 0, {})
-					state.doc:set_mark(stmt, mark)
+			for _, stmt in ipairs(state.doc:records()) do
+				if not stmt.parsed then
 					submit_parse(state, stmt)
 				end
 			end
 
+			require('qalc.output').refresh(state)
 			rebuild(state)
 		elseif state then
 			state.needs_initialization = true
@@ -304,7 +290,7 @@ local function on_lines(_, bufnr, _, first_lnum, old_last_lnum, new_last_lnum)
 	local state = M.attached_bufs[bufnr]
 	if not state then return true end
 
-	local removed = state.doc:apply_edit(first_lnum, old_last_lnum, new_last_lnum)
+	state.doc:apply_edit(first_lnum, old_last_lnum, new_last_lnum)
 	state.is_initializing = true
 
 	if not M.is_active(bufnr) then
@@ -313,13 +299,7 @@ local function on_lines(_, bufnr, _, first_lnum, old_last_lnum, new_last_lnum)
 		return
 	end
 
-	local dirty = dirty_bufs[bufnr] or { retired = {} }
-	for _, stmt in ipairs(removed) do
-		if stmt.mark then
-			dirty.retired[stmt.id] = stmt
-		end
-	end
-	dirty_bufs[bufnr] = dirty
+	dirty_bufs[bufnr] = true
 
 	if not flush_scheduled then
 		flush_scheduled = true
