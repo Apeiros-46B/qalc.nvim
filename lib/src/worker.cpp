@@ -34,6 +34,19 @@ void Diagnostic::to_lua(lua_State* L, const Diagnostic& self) {
 	lua::push_and_set(L, self.msg, "message");
 }
 
+void ParseResult::to_lua(lua_State* L, ParseResult& self) {
+	lua_createtable(L, 0, 5);
+	lua::push_and_set(L, static_cast<double>(self.stmt_id), "stmt_id");
+
+	lua::make_array<Diagnostic>(L, self.diags, Diagnostic::to_lua);
+	lua_setfield(L, -2, "diags");
+	lua::make_array<Definition>(L, self.outputs, Definition::to_lua);
+	lua_setfield(L, -2, "outputs");
+	lua::make_array<std::string>(L, self.in_syms);
+	lua_setfield(L, -2, "in_syms");
+	lua::push_and_set(L, self.norm_expr, "norm_expr");
+}
+
 void init_mt(lua_State* L) {
 	luaL_newmetatable(L, MT);
 
@@ -83,31 +96,71 @@ int lua_init_loop(lua_State* L) {
 }
 
 // submits a job to the worker thread. it should have been intialized already
-// lib.submit_job(type, bufnr, extmark_id, payload)
+// lib.submit_job(type, bufnr, req_id, payload)
 int lua_submit_job(lua_State* L) {
 	JobType type = static_cast<JobType>(lua::pop<int>(L, 1));
 	int bufnr = lua::pop<int>(L, 2);
-	int extmark_id = lua::pop<int>(L, 3);
+	std::uint64_t req_id = static_cast<std::uint64_t>(luaL_checknumber(L, 3));
 	std::string payload = lua::pop_or<std::string>(L, 4, "");
 
 	if (worker != nullptr) {
-		worker->submit_job({type, bufnr, extmark_id, payload});
+		Job job;
+		job.type = type;
+		job.bufnr = bufnr;
+		job.id = req_id;
+		job.payload = std::move(payload);
+		worker->submit_job(std::move(job));
+	}
+	return 0;
+}
+
+// lib.submit_parse_batch(bufnr, req_id, {{ stmt_id, text }, ...})
+int lua_submit_parse_batch(lua_State* L) {
+	int bufnr = lua::pop<int>(L, 1);
+	std::uint64_t req_id = static_cast<std::uint64_t>(luaL_checknumber(L, 2));
+	luaL_checktype(L, 3, LUA_TTABLE);
+
+	Job job;
+	job.type = JobType::PARSE_BATCH;
+	job.bufnr = bufnr;
+	job.id = req_id;
+
+	std::size_t count = lua_objlen(L, 3);
+	job.parse_inputs.reserve(count);
+	for (std::size_t i = 1; i <= count; ++i) {
+		lua_rawgeti(L, 3, static_cast<int>(i));
+		luaL_checktype(L, -1, LUA_TTABLE);
+
+		lua_getfield(L, -1, "stmt_id");
+		std::uint64_t stmt_id = static_cast<std::uint64_t>(
+			luaL_checknumber(L, -1)
+		);
+		lua_pop(L, 1);
+
+		lua_getfield(L, -1, "text");
+		std::string text = lua::pop<std::string>(L, -1);
+		lua_pop(L, 1);
+		lua_pop(L, 1);
+
+		job.parse_inputs.push_back({stmt_id, std::move(text)});
+	}
+
+	if (worker != nullptr) {
+		worker->submit_job(std::move(job));
 	}
 	return 0;
 }
 
 // set the callback used when jobs complete
 // lib.set_callback(function(...) ... end)
-// callback should be a function of 9 arguments:
+// callback should be a function of 7 arguments:
 // - type (int)
 // - bufnr (int)
-// - extmark_id (int)
+// - id (number)
 // - output (str)
-// - diagnostics (tbl)
-// - out_syms (tbl)
-// - in_syms (tbl)
-// - definitions (tbl)
-// - norm_expr (str)
+// - diags (tbl)
+// - defs (tbl)
+// - parse_results (tbl)
 int lua_set_callback(lua_State* L) {
 	if (!lua_isfunction(L, 1)) {
 		luaL_error(L, "expected function as arg 1");
@@ -212,7 +265,10 @@ void Worker::submit_job(Job&& job) {
 }
 
 // worker thread
-static void get_diagnostics(Calculator* calc, JobResult& result) {
+static void get_diags(
+	Calculator* calc,
+	std::vector<Diagnostic>& diags
+) {
 	CalculatorMessage* msg;
 	while ((msg = calc->message()) != nullptr) {
 		Diagnostic diag;
@@ -230,7 +286,7 @@ static void get_diagnostics(Calculator* calc, JobResult& result) {
 				break;
 		}
 
-		result.diagnostics.push_back(diag);
+		diags.push_back(diag);
 		calc->nextMessage();
 	}
 }
@@ -266,9 +322,14 @@ static void clear_syms(Calculator* calc) {
 
 // worker thread
 // parse an expression and extract assigned and read symbols, along with any messages
-static void parse_line(Calculator* calc, Job& job, JobResult& result) {
-	ParseOptions opts = job.get_parse_options();
-	std::string expr = job.payload;
+static void parse_line(
+	Calculator* calc,
+	const ParseInput& input,
+	ParseResult& result
+) {
+	Job options_job;
+	ParseOptions opts = options_job.get_parse_options();
+	std::string expr = input.text;
 	// thankfully this exists
 	transform_expression_for_equals_save(expr, opts);
 
@@ -281,12 +342,27 @@ static void parse_line(Calculator* calc, Job& job, JobResult& result) {
 		// prevent calculateAndPrint() from reinterpreting the comparison as a save
 		expr = "(" + expr + ")";
 	}
-	if (expr != job.payload) {
+	if (expr != input.text) {
 		result.norm_expr = expr;
 	}
-	get_diagnostics(calc, result);
-	extract_symbols(calc, ast, result.in_syms, result.out_syms);
-	extract_function_calls(calc, job.payload, result.in_syms);
+	get_diags(calc, result.diags);
+	extract_syms(calc, ast, result.in_syms, result.outputs);
+	extract_fn_calls(calc, input.text, result.in_syms);
+}
+
+static void parse_batch(Calculator* calc, Job& job, JobResult& result) {
+	result.parse_results.reserve(job.parse_inputs.size());
+	for (const ParseInput& input : job.parse_inputs) {
+		ParseResult parsed;
+		parsed.stmt_id = input.stmt_id;
+		try {
+			parse_line(calc, input, parsed);
+		} catch (const std::exception& e) {
+			get_diags(calc, parsed.diags);
+			parsed.diags.push_back({Severity::ERROR, e.what()});
+		}
+		result.parse_results.push_back(std::move(parsed));
+	}
 }
 
 // worker thread
@@ -300,12 +376,12 @@ static bool eval_line(Calculator* calc, Job& job, JobResult& result) {
 		job.get_print_options()
 	);
 	auto elapsed = std::chrono::steady_clock::now() - started_at;
-	get_diagnostics(calc, result);
+	get_diags(calc, result.diags);
 
 	// for debugging symbol extraction
 	// MathStructure ast;
 	// calc->parse(&ast, job.payload, job.get_parse_options());
-	// get_diagnostics(calc, result);
+	// get_diags(calc, result);
 	// extract_symbols(calc, ast, result.in_syms, result.out_syms);
 	// result.output = dump_ast(ast);
 
@@ -318,16 +394,16 @@ static void get_defs(Calculator* calc, Job& job, JobResult& result) {
 	PrintOptions po = job.get_print_options();
 
 	for (auto* func : calc->functions) {
-		push_def(calc, func, po, result.definitions);
+		push_def(calc, func, po, result.defs);
 	}
 	for (auto* var : calc->variables) {
-		push_def(calc, var, po, result.definitions);
+		push_def(calc, var, po, result.defs);
 	}
 	for (auto* unit : calc->units) {
-		push_def(calc, unit, po, result.definitions);
+		push_def(calc, unit, po, result.defs);
 	}
 	for (auto* pref : calc->prefixes) {
-		push_prefix_def(calc, pref, po, result.definitions);
+		push_prefix_def(calc, pref, po, result.defs);
 	}
 }
 
@@ -351,7 +427,7 @@ void Worker::main_loop() {
 		JobResult result;
 		result.type = job.type;
 		result.bufnr = job.bufnr;
-		result.extmark_id = job.extmark_id;
+		result.id = job.id;
 
 		try {
 			switch (job.type) {
@@ -366,8 +442,8 @@ void Worker::main_loop() {
 					clear_syms(calc);
 					continue;
 				}
-				case JobType::PARSE_LINE: {
-					parse_line(calc, job, result);
+				case JobType::PARSE_BATCH: {
+					parse_batch(calc, job, result);
 					break;
 				}
 				case JobType::EVAL_LINE: {
@@ -375,7 +451,7 @@ void Worker::main_loop() {
 
 					if (timed_out) {
 						result.output.clear();
-						result.diagnostics.push_back({Severity::ERROR, TIMEOUT_MSG});
+						result.diags.push_back({Severity::ERROR, TIMEOUT_MSG});
 						purge_eval_queue();
 					}
 					break;
@@ -388,8 +464,8 @@ void Worker::main_loop() {
 			}
 		} catch (const std::exception& e) {
 			result.output = "";
-			result.diagnostics.clear();
-			result.diagnostics.push_back({Severity::ERROR, e.what()});
+			result.diags.clear();
+			result.diags.push_back({Severity::ERROR, e.what()});
 		}
 
 		// push results and notify main thread
@@ -420,21 +496,19 @@ void Worker::process_results() {
 			// pushes 1 item (the callback)
 			lua_rawgeti(L, LUA_REGISTRYINDEX, callback_ref);
 
-			// pushes 9 args
+			// pushes 7 args
 			lua::push(L,
 				static_cast<int>(res.type),
 				res.bufnr,
-				res.extmark_id,
+				static_cast<double>(res.id),
 				res.output
 			);
-			lua::make_array<Diagnostic>(L, res.diagnostics, Diagnostic::to_lua);
-			lua::make_array<Definition>(L, res.out_syms, Definition::to_lua);
-			lua::make_array<std::string>(L, res.in_syms);
-			lua::make_array<Definition>(L, res.definitions, Definition::to_lua);
-			lua::push(L, res.norm_expr);
+			lua::make_array<Diagnostic>(L, res.diags, Diagnostic::to_lua);
+			lua::make_array<Definition>(L, res.defs, Definition::to_lua);
+			lua::make_array<ParseResult>(L, res.parse_results, ParseResult::to_lua);
 
-			// pops callback + 9 args (10 items)
-			if (lua_pcall(L, 9, 0, 0) != LUA_OK) {
+			// pops callback + 7 args (8 items)
+			if (lua_pcall(L, 7, 0, 0) != LUA_OK) {
 				fprintf(stderr, "qalc error: %s\n", lua_tostring(L, -1));
 				lua_pop(L, 1);
 			}
@@ -451,15 +525,15 @@ void Worker::purge_eval_queue() {
 		Job pending = std::move(input.front());
 		input.pop();
 
-		// only purge evaluations. we should preserve PARSE_LINE and other jobs so the
+		// only purge evaluations. we should preserve PARSE_BATCH and other jobs so the
 		// depgraph never desyncs from calculator memory
 		if (pending.type == JobType::EVAL_LINE) {
 			JobResult result;
 			result.type = pending.type;
 			result.bufnr = pending.bufnr;
-			result.extmark_id = pending.extmark_id;
+			result.id = pending.id;
 			result.output = "";
-			result.diagnostics.push_back({Severity::ERROR, PURGED_TIMEOUT_MSG});
+			result.diags.push_back({Severity::ERROR, PURGED_TIMEOUT_MSG});
 
 			output.push(std::move(result));
 		} else {

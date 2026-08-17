@@ -52,7 +52,7 @@ function M.build(stmts)
 		if parsed and not parsed.skip then
 			local node = {
 				stmt = stmt,
-				decl_outputs = parsed.out_syms or {},
+				decl_outputs = parsed.outputs or {},
 				outputs = {},
 				in_syms = {},
 				norm_expr = parsed.norm_expr,

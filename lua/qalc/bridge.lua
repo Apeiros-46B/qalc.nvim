@@ -25,9 +25,9 @@ function M.syntax_highlight()
 	end
 end
 
-function M.submit(type, bufnr, extmark, payload)
+function M.submit(type, bufnr, req_id, payload)
 	-- strip comments
-	if (type == util.JobType.EVAL_LINE or type == util.JobType.PARSE_LINE) then
+	if type == util.JobType.EVAL_LINE then
 		payload = payload:gsub(util.comment_pat, '')
 	end
 
@@ -37,25 +37,31 @@ function M.submit(type, bufnr, extmark, payload)
 
 	if type == util.JobType.EVAL_LINE then
 		if is_forbidden then
-			util.emit_signal('eval_done', bufnr, extmark, '', {{
-				message = 'Legacy "function" syntax disabled. Use f(x) := ...',
+			util.emit_signal('eval_done', bufnr, req_id, '', {{
+				message = 'Legacy "function" syntax is unsupported. Use "f(...) := ..."',
 				severity = vim.diagnostic.severity.ERROR,
 			}})
 			return
 		elseif is_blank then
-			util.emit_signal('eval_done', bufnr, extmark, '', {})
+			util.emit_signal('eval_done', bufnr, req_id, '', {})
 			return
-		end
-	elseif type == util.JobType.PARSE_LINE then
-		if is_forbidden or is_blank then
-			-- force parser to parse empty string to update depgraph in callback
-			-- we can't update it directly because race conditions might occur
-			-- sending jobs enforces a strict order since they are queued on the worker thread
-			payload = ''
 		end
 	end
 
-	require('qalc.lib').submit_job(type, bufnr, extmark, payload)
+	require('qalc.lib').submit_job(type, bufnr, req_id, payload)
+end
+
+function M.submit_parse_batch(bufnr, req_id, stmts)
+	local inputs = {}
+	for _, stmt in ipairs(stmts) do
+		local text = stmt.text:gsub(util.comment_pat, '')
+		if text:match('^%s*function%s+') then text = '' end
+		inputs[#inputs+1] = {
+			stmt_id = stmt.id,
+			text = text,
+		}
+	end
+	require('qalc.lib').submit_parse_batch(bufnr, req_id, inputs)
 end
 
 local function handle_get_defs(attached_bufs, defs)
@@ -172,18 +178,16 @@ function M.register_callback(attached_bufs)
 	local function handle_job(
 		type,
 		bufnr,
-		extmark,
+		req_id,
 		output,
 		diags,
-		out_syms,
-		in_syms,
 		defs,
-		norm_expr
+		parse_results
 	)
 		if type == util.JobType.EVAL_LINE then
-			util.emit_signal('eval_done', bufnr, extmark, output, diags)
-		elseif type == util.JobType.PARSE_LINE then
-			util.emit_signal('parse_done', bufnr, extmark, out_syms, in_syms, norm_expr)
+			util.emit_signal('eval_done', bufnr, req_id, output, diags)
+		elseif type == util.JobType.PARSE_BATCH then
+			util.emit_signal('parse_batch_done', bufnr, req_id, parse_results)
 		elseif type == util.JobType.GET_DEFS then
 			handle_get_defs(attached_bufs, defs)
 		end

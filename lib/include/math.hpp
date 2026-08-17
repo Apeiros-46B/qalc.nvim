@@ -103,7 +103,7 @@ bool is_valid_var_name(Calculator* calc, const std::string& s);
 bool is_valid_function_name(Calculator* calc, const std::string& s);
 
 // extract call names independently of the calculator's current function definitions
-void extract_function_calls(
+void extract_fn_calls(
 	Calculator* calc,
 	const std::string& expression,
 	std::vector<std::string>& in_syms
@@ -126,7 +126,7 @@ bool get_canonical_name(const MathStructure& ast, std::string& out);
 //    dependency because it evaluates to a symbol instead of the actual value
 // -> backslashed symbols (\x) seem to have the same behaviour EXCEPT in function defs,
 //    in which they serve as implicit positional args (\x = 1st arg, \y = 2nd, etc)
-void extract_symbols(
+void extract_syms(
 	Calculator* calc,
 	const MathStructure& ast,
 	std::vector<std::string>& in_syms,

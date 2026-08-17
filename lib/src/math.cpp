@@ -360,7 +360,7 @@ bool is_valid_function_name(Calculator* calc, const std::string& s) {
 	return s != "undefined" && calc->functionNameIsValid(s);
 }
 
-void extract_function_calls(
+void extract_fn_calls(
 	Calculator* calc,
 	const std::string& expr,
 	std::vector<std::string>& in_syms
@@ -458,7 +458,7 @@ bool get_canonical_name(const MathStructure& ast, std::string& out) {
 	}
 }
 
-void extract_symbols(
+void extract_syms(
 	Calculator* calc,
 	const MathStructure& ast,
 	std::vector<std::string>& in_syms,
@@ -564,7 +564,7 @@ void extract_symbols(
 							}
 						}
 					}
-					extract_symbols(calc, *rhs, in_syms, out_syms, new_locals);
+					extract_syms(calc, *rhs, in_syms, out_syms, new_locals);
 					return;
 				} else {
 					// normal function call (e.g., sin(x) or myfunc(5))
@@ -584,7 +584,7 @@ void extract_symbols(
 	// fallback for others
 	for (size_t i = 1; i <= ast.countChildren(); ++i) {
 		if (const MathStructure* child = ast.getChild(i)) {
-			extract_symbols(calc, *child, in_syms, out_syms, local_vars);
+			extract_syms(calc, *child, in_syms, out_syms, local_vars);
 		}
 	}
 }

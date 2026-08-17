@@ -10,14 +10,20 @@ local function flush_diags(state)
 	local all_diags = {}
 	for row, stmt in ipairs(state.doc:records()) do
 		local seen_messages = {}
-		for _, diag in ipairs(stmt.diags or {}) do
-			if not seen_messages[diag.message] then
-				seen_messages[diag.message] = true
-				local copy = vim.deepcopy(diag)
-				copy.bufnr = state.bufnr
-				copy.lnum = row - 1
-				copy.col = 0
-				all_diags[#all_diags+1] = copy
+		local sources = {
+			stmt.parsed and stmt.parsed.diags or {},
+			stmt.diags or {},
+		}
+		for _, diags in ipairs(sources) do
+			for _, diag in ipairs(diags) do
+				if not seen_messages[diag.message] then
+					seen_messages[diag.message] = true
+					local copy = vim.deepcopy(diag)
+					copy.bufnr = state.bufnr
+					copy.lnum = row - 1
+					copy.col = 0
+					all_diags[#all_diags+1] = copy
+				end
 			end
 		end
 	end

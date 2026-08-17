@@ -5,7 +5,7 @@ M.ns_ui = vim.api.nvim_create_namespace('qalc_ui')
 M.JobType = {
 	DELETE_SYM = 1,
 	CLEAR_SYMS = 2,
-	PARSE_LINE = 3,
+	PARSE_BATCH = 3,
 	EVAL_LINE = 4,
 	GET_DEFS = 5,
 }
@@ -21,8 +21,8 @@ M.LspKind = {
 M.comment_pat = '#.*$'
 
 -- events:
--- 'eval_done',      (bufnr, extmark, output, diags, outs, ins)
--- 'parse_done',     (bufnr, extmark, out_syms, in_syms, norm_expr)
+-- 'eval_done',        (bufnr, stmt_id, output, diagnostics)
+-- 'parse_batch_done', (bufnr, req_id, results)
 
 local signal_handlers = {}
 local signal_guards = {}

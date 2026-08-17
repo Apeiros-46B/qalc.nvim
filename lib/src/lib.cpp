@@ -6,10 +6,11 @@ extern "C" {
 #include "worker.hpp"
 
 static const luaL_Reg functions[] = {
-	{ "init_loop",     worker::lua_init_loop    },
-	{ "submit_job",    worker::lua_submit_job   },
-	{ "set_callback",  worker::lua_set_callback },
-	{ nullptr,         nullptr                  },
+	{ "init_loop",          worker::lua_init_loop          },
+	{ "submit_parse_batch", worker::lua_submit_parse_batch },
+	{ "submit_job",         worker::lua_submit_job         },
+	{ "set_callback",       worker::lua_set_callback       },
+	{ nullptr,              nullptr                        },
 };
 
 // in lua code, it is required as "qalc.lib" so this is named luaopen_qalc_lib

@@ -17,8 +17,12 @@ local flush_scheduled = false
 local calculator_valid = false
 local committed_bufnr = nil
 local committed_graph = nil
+
 local eval_inflight = nil
 local pending_eval = nil
+
+local parse_inflight = nil
+local next_parse_req_id = 0
 
 local function new_buf_state(bufnr, lines)
 	lines = lines or vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -33,26 +37,10 @@ local function new_buf_state(bufnr, lines)
 	}
 end
 
-local function submit_parse(state, stmt)
-	local expr = stmt.text:gsub(util.comment_pat, '')
-	if not expr:match('%S') then
-		stmt.parsed = { out_syms = {}, in_syms = {}, norm_expr = '', skip = true }
-		return
-	end
-
-	require('qalc.bridge').submit(
-		util.JobType.PARSE_LINE,
-		state.bufnr,
-		stmt.id,
-		stmt.text
-	)
-end
-
 local function has_timeout(diags)
-	for _, diagnostic in ipairs(diags or {}) do
-		if
-			diagnostic.message == 'Calculation took too long'
-			or diagnostic.message == 'Dependent calculation took too long'
+	for _, diag in ipairs(diags or {}) do
+		if diag.message == 'Calculation took too long'
+			or diag.message == 'Dependent calculation took too long'
 		then
 			return true
 		end
@@ -61,6 +49,47 @@ local function has_timeout(diags)
 end
 
 local start_eval
+local rebuild
+
+-- parse all unresolved statements, then rebuild and evaluate one coherent graph snapshot.
+local function request_parse(state)
+	if parse_inflight then return end
+
+	local stmts = {}
+	for _, stmt in ipairs(state.doc:records()) do
+		if not stmt.parsed then
+			if not stmt.text then return end
+			local expr = stmt.text:gsub(util.comment_pat, '')
+			if expr:match('%S') then
+				stmts[#stmts+1] = stmt
+			else
+				stmt.parsed = {
+					outputs = {},
+					in_syms = {},
+					norm_expr = '',
+					diags = {},
+					skip = true,
+				}
+			end
+		end
+	end
+
+	if #stmts == 0 then
+		rebuild(state)
+		return
+	end
+
+	next_parse_req_id = next_parse_req_id + 1
+	parse_inflight = {
+		req_id = next_parse_req_id,
+		state = state,
+	}
+	require('qalc.bridge').submit_parse_batch(
+		state.bufnr,
+		next_parse_req_id,
+		stmts
+	)
+end
 
 local function finish_eval(complete)
 	local finished = eval_inflight
@@ -130,10 +159,10 @@ start_eval = function(state, graph)
 	if reset then
 		bridge.submit(util.JobType.CLEAR_SYMS, state.bufnr, -1, '')
 	else
-		local symbols = vim.tbl_keys(plan.deletions)
-		table.sort(symbols)
-		for _, symbol in ipairs(symbols) do
-			bridge.submit(util.JobType.DELETE_SYM, state.bufnr, -1, symbol)
+		local syms = vim.tbl_keys(plan.deletions)
+		table.sort(syms)
+		for _, sym in ipairs(syms) do
+			bridge.submit(util.JobType.DELETE_SYM, state.bufnr, -1, sym)
 		end
 	end
 
@@ -170,11 +199,11 @@ start_eval = function(state, graph)
 	for _, id in ipairs(plan.eval_ord) do
 		local stmt = state.doc:get(id)
 		if stmt then
-			local expression = graph.nodes[id].norm_expr
-			if not expression or expression == '' then
-				expression = stmt.text
+			local expr = graph.nodes[id].norm_expr
+			if not expr or expr == '' then
+				expr = stmt.text
 			end
-			bridge.submit(util.JobType.EVAL_LINE, state.bufnr, id, expression)
+			bridge.submit(util.JobType.EVAL_LINE, state.bufnr, id, expr)
 		end
 	end
 
@@ -191,7 +220,7 @@ local function request_eval(state, graph)
 	end
 end
 
-local function rebuild(state)
+rebuild = function(state)
 	if state.needs_initialization or not M.is_active(state.bufnr) then return end
 
 	for _, stmt in ipairs(state.doc:records()) do
@@ -249,11 +278,7 @@ function M.hard_reset(bufnr)
 	state.needs_initialization = false
 	M.attached_bufs[bufnr] = state
 
-	for _, stmt in ipairs(state.doc:records()) do
-		submit_parse(state, stmt)
-	end
-
-	rebuild(state)
+	request_parse(state)
 end
 
 local function flush_dirty_bufs()
@@ -269,15 +294,8 @@ local function flush_dirty_bufs()
 			and not state.needs_initialization
 		then
 			state.doc:settle(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
-
-			for _, stmt in ipairs(state.doc:records()) do
-				if not stmt.parsed then
-					submit_parse(state, stmt)
-				end
-			end
-
 			require('qalc.output').refresh(state)
-			rebuild(state)
+			request_parse(state)
 		elseif state then
 			state.needs_initialization = true
 		end
@@ -377,23 +395,32 @@ function M.get_graph(bufnr)
 	return state and state.graph
 end
 
-util.connect_signal('parse_done', function(bufnr, stmt_id, out_syms, in_syms, norm_expr)
+util.connect_signal('parse_batch_done', function(bufnr, req_id, results)
+	local finished = parse_inflight
+	if not finished or finished.req_id ~= req_id then return end
+	parse_inflight = nil
+
 	local state = M.attached_bufs[bufnr]
-	if not state then return end
-	if not M.is_active(bufnr) then
+	if state == finished.state and M.is_active(bufnr) then
+		for _, result in ipairs(results) do
+			local stmt = state.doc:get(result.stmt_id)
+			if stmt then
+				stmt.parsed = {
+					outputs = result.outputs,
+					in_syms = result.in_syms,
+					norm_expr = result.norm_expr,
+					diags = result.diags,
+				}
+			end
+		end
+	elseif state == finished.state then
 		state.needs_initialization = true
-		return
 	end
 
-	local stmt = state.doc:get(stmt_id)
-	if not stmt then return end
-	stmt.parsed = {
-		out_syms = out_syms,
-		in_syms = in_syms,
-		norm_expr = norm_expr,
-	}
-
-	rebuild(state)
+	local active_state = M.attached_bufs[cur_active_buf]
+	if active_state and not active_state.needs_initialization then
+		request_parse(active_state)
+	end
 end)
 
 util.connect_signal('eval_done', handle_eval_result)

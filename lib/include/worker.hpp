@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <queue>
 #include <string>
@@ -26,6 +27,7 @@ void init(lua_State* L);
 
 // called from lua
 int lua_init_loop(lua_State* L);
+int lua_submit_parse_batch(lua_State* L);
 int lua_submit_job(lua_State* L);
 int lua_set_callback(lua_State* L);
 
@@ -33,7 +35,7 @@ int lua_set_callback(lua_State* L);
 enum class JobType: int {
 	DELETE_SYM = 1,
 	CLEAR_SYMS = 2,
-	PARSE_LINE = 3,
+	PARSE_BATCH = 3,
 	EVAL_LINE = 4,
 	GET_DEFS = 5,
 };
@@ -45,18 +47,33 @@ struct Diagnostic {
 	static void to_lua(lua_State* L, const Diagnostic& self);
 };
 
+struct ParseInput {
+	std::uint64_t stmt_id;
+	std::string text;
+};
+
+struct ParseResult {
+	std::uint64_t stmt_id;
+	std::vector<Diagnostic> diags;
+	std::vector<Definition> outputs;
+	std::vector<std::string> in_syms;
+	std::string norm_expr;
+
+	static void to_lua(lua_State* L, ParseResult& self);
+};
+
 // TODO: take in print options
 struct Job {
-	JobType type;
-	int bufnr;
-	int extmark_id;
+	JobType type = JobType::GET_DEFS;
+	int bufnr = 0;
+	std::uint64_t id = 0;
 
 	// when type is DELETE_SYM, payload = the symbol to delete
 	// when type is CLEAR_SYMS, payload = undefined
-	// when type is PARSE_LINE, payload = the line to parse
 	// when type is EVAL_LINE, payload = the line to eval
 	// otherwise undefined
 	std::string payload;
+	std::vector<ParseInput> parse_inputs;
 
 	ParseOptions get_parse_options();
 	PrintOptions get_print_options();
@@ -67,22 +84,20 @@ struct JobResult {
 	// can never be DELETE_SYM or CLEAR_SYMS, they return no results
 	JobType type;
 	int bufnr;
-	int extmark_id;
+	std::uint64_t id;
 
 	// when type is EVAL_LINE, output = calculation result
 	// otherwise undefined
 	std::string output;
 
-	// empty unless type is PARSE_LINE, EVAL_LINE
-	std::vector<Diagnostic> diagnostics;
+	// empty unless type is EVAL_LINE
+	std::vector<Diagnostic> diags;
 
-	// empty unless type is PARSE_LINE
-	std::vector<Definition> out_syms;
-	std::vector<std::string> in_syms;
-	std::string norm_expr;
+	// empty unless type is PARSE_BATCH
+	std::vector<ParseResult> parse_results;
 
 	// empty unless type is GET_DEFS
-	std::vector<Definition> definitions;
+	std::vector<Definition> defs;
 };
 
 class Worker {
