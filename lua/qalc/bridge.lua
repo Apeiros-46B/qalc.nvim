@@ -25,32 +25,6 @@ function M.syntax_highlight()
 	end
 end
 
-function M.submit(type, bufnr, req_id, payload)
-	-- strip comments
-	if type == util.JobType.EVAL_LINE then
-		payload = payload:gsub(util.comment_pat, '')
-	end
-
-	-- don't allow legacy function syntax, too hard to parse for depgraph
-	local is_forbidden = payload:match('^%s*function%s+')
-	local is_blank = not payload:match('%S')
-
-	if type == util.JobType.EVAL_LINE then
-		if is_forbidden then
-			util.emit_signal('eval_done', bufnr, req_id, '', {{
-				message = 'Legacy "function" syntax is unsupported. Use "f(...) := ..."',
-				severity = vim.diagnostic.severity.ERROR,
-			}})
-			return
-		elseif is_blank then
-			util.emit_signal('eval_done', bufnr, req_id, '', {})
-			return
-		end
-	end
-
-	require('qalc.lib').submit_job(type, bufnr, req_id, payload)
-end
-
 function M.submit_parse_batch(bufnr, req_id, stmts)
 	local inputs = {}
 	for _, stmt in ipairs(stmts) do
@@ -62,6 +36,37 @@ function M.submit_parse_batch(bufnr, req_id, stmts)
 		}
 	end
 	require('qalc.lib').submit_parse_batch(bufnr, req_id, inputs)
+end
+
+function M.submit_eval_batch(
+	bufnr,
+	doc_id,
+	generation,
+	reset,
+	deletions,
+	evals
+)
+	local inputs = {}
+	for _, eval in ipairs(evals) do
+		local expr = eval.expr:gsub(util.comment_pat, '')
+		local err
+		if expr:match('^%s*function%s+') then
+			err = 'Legacy "function" syntax disabled. Use f(x) := ...'
+		end
+		inputs[#inputs+1] = {
+			stmt_id = eval.stmt_id,
+			expr = expr,
+			error = err,
+		}
+	end
+	require('qalc.lib').submit_eval_batch(
+		bufnr,
+		doc_id,
+		generation,
+		reset,
+		deletions,
+		inputs
+	)
 end
 
 local function handle_get_defs(attached_bufs, defs)
@@ -179,15 +184,14 @@ function M.register_callback(attached_bufs)
 		type,
 		bufnr,
 		req_id,
-		output,
-		diags,
 		defs,
-		parse_results
+		parse_results,
+		eval_batch
 	)
-		if type == util.JobType.EVAL_LINE then
-			util.emit_signal('eval_done', bufnr, req_id, output, diags)
-		elseif type == util.JobType.PARSE_BATCH then
+		if type == util.JobType.PARSE_BATCH then
 			util.emit_signal('parse_batch_done', bufnr, req_id, parse_results)
+		elseif type == util.JobType.EVAL_BATCH then
+			util.emit_signal('eval_batch_done', bufnr, eval_batch)
 		elseif type == util.JobType.GET_DEFS then
 			handle_get_defs(attached_bufs, defs)
 		end
@@ -199,7 +203,7 @@ function M.register_callback(attached_bufs)
 	dummy:close()
 
 	lib.set_callback(vim.schedule_wrap(handle_job))
-	lib.submit_job(util.JobType.GET_DEFS, 0, 0, '')
+	lib.get_defs()
 end
 
 -- get definitions of a word, which may be a prefix + unit combination

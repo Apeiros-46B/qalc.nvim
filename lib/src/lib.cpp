@@ -7,8 +7,9 @@ extern "C" {
 
 static const luaL_Reg functions[] = {
 	{ "init_loop",          worker::lua_init_loop          },
+	{ "get_defs",           worker::lua_get_defs           },
+	{ "submit_eval_batch",  worker::lua_submit_eval_batch  },
 	{ "submit_parse_batch", worker::lua_submit_parse_batch },
-	{ "submit_job",         worker::lua_submit_job         },
 	{ "set_callback",       worker::lua_set_callback       },
 	{ nullptr,              nullptr                        },
 };

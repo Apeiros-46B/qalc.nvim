@@ -24,8 +24,9 @@ namespace worker {
 static Worker* worker = nullptr;
 
 constexpr int EVAL_TIMEOUT_MS = 2000;
-constexpr const char* TIMEOUT_MSG = "Calculation took too long";
-constexpr const char* PURGED_TIMEOUT_MSG = "Dependent calculation took too long";
+constexpr const char* TIMEOUT_MSG = "Calculation exceeded the 2-second time limit.";
+constexpr const char* SKIPPED_TIMEOUT_MSG = "Calculation skipped because an earlier calculation timed out.";
+constexpr const char* SKIPPED_FAILURE_MSG = "Calculation skipped because the evaluation transaction failed.";
 
 void Diagnostic::to_lua(lua_State* L, const Diagnostic& self) {
 	lua_createtable(L, 0, 2);
@@ -45,6 +46,23 @@ void ParseResult::to_lua(lua_State* L, ParseResult& self) {
 	lua::make_array<std::string>(L, self.in_syms);
 	lua_setfield(L, -2, "in_syms");
 	lua::push_and_set(L, self.norm_expr, "norm_expr");
+}
+
+void EvalResult::to_lua(lua_State* L, EvalResult& self) {
+	lua_createtable(L, 0, 3);
+	lua::push_and_set(L, static_cast<double>(self.stmt_id), "stmt_id");
+	lua::push_and_set(L, self.output, "output");
+	lua::make_array<Diagnostic>(L, self.diags, Diagnostic::to_lua);
+	lua_setfield(L, -2, "diags");
+}
+
+void EvalBatchResult::to_lua(lua_State* L, EvalBatchResult& self) {
+	lua_createtable(L, 0, 4);
+	lua::push_and_set(L, static_cast<double>(self.doc_id), "doc_id");
+	lua::push_and_set(L, static_cast<double>(self.generation), "generation");
+	lua::push_and_set(L, self.complete, "complete");
+	lua::make_array<EvalResult>(L, self.results, EvalResult::to_lua);
+	lua_setfield(L, -2, "results");
 }
 
 void init_mt(lua_State* L) {
@@ -95,20 +113,65 @@ int lua_init_loop(lua_State* L) {
 	return 0;
 }
 
-// submits a job to the worker thread. it should have been intialized already
-// lib.submit_job(type, bufnr, req_id, payload)
-int lua_submit_job(lua_State* L) {
-	JobType type = static_cast<JobType>(lua::pop<int>(L, 1));
-	int bufnr = lua::pop<int>(L, 2);
-	std::uint64_t req_id = static_cast<std::uint64_t>(luaL_checknumber(L, 3));
-	std::string payload = lua::pop_or<std::string>(L, 4, "");
-
+int lua_get_defs(lua_State*) {
 	if (worker != nullptr) {
 		Job job;
-		job.type = type;
-		job.bufnr = bufnr;
-		job.id = req_id;
-		job.payload = std::move(payload);
+		job.type = JobType::GET_DEFS;
+		worker->submit_job(std::move(job));
+	}
+	return 0;
+}
+
+// lib.submit_eval_batch(bufnr, doc_id, generation, reset, deletions, inputs)
+int lua_submit_eval_batch(lua_State* L) {
+	Job job;
+	job.type = JobType::EVAL_BATCH;
+	job.bufnr = lua::pop<int>(L, 1);
+	job.eval_batch.doc_id = static_cast<std::uint64_t>(luaL_checknumber(L, 2));
+	job.eval_batch.generation = static_cast<std::uint64_t>(luaL_checknumber(L, 3));
+
+	luaL_checktype(L, 4, LUA_TBOOLEAN);
+	job.eval_batch.reset = lua_toboolean(L, 4);
+
+	luaL_checktype(L, 5, LUA_TTABLE);
+	std::size_t deletion_count = lua_objlen(L, 5);
+	job.eval_batch.deletions.reserve(deletion_count);
+	for (std::size_t i = 1; i <= deletion_count; ++i) {
+		lua_rawgeti(L, 5, static_cast<int>(i));
+		job.eval_batch.deletions.push_back(lua::pop<std::string>(L, -1));
+		lua_pop(L, 1);
+	}
+
+	luaL_checktype(L, 6, LUA_TTABLE);
+	std::size_t input_count = lua_objlen(L, 6);
+	job.eval_batch.inputs.reserve(input_count);
+	for (std::size_t i = 1; i <= input_count; ++i) {
+		lua_rawgeti(L, 6, static_cast<int>(i));
+		luaL_checktype(L, -1, LUA_TTABLE);
+
+		lua_getfield(L, -1, "stmt_id");
+		std::uint64_t stmt_id = static_cast<std::uint64_t>(
+			luaL_checknumber(L, -1)
+		);
+		lua_pop(L, 1);
+
+		lua_getfield(L, -1, "expr");
+		std::string expr = lua::pop<std::string>(L, -1);
+		lua_pop(L, 1);
+
+		lua_getfield(L, -1, "error");
+		std::string error = lua::pop_or<std::string>(L, -1, "");
+		lua_pop(L, 1);
+		lua_pop(L, 1);
+
+		job.eval_batch.inputs.push_back({
+			stmt_id,
+			std::move(expr),
+			std::move(error),
+		});
+	}
+
+	if (worker != nullptr) {
 		worker->submit_job(std::move(job));
 	}
 	return 0;
@@ -153,14 +216,13 @@ int lua_submit_parse_batch(lua_State* L) {
 
 // set the callback used when jobs complete
 // lib.set_callback(function(...) ... end)
-// callback should be a function of 7 arguments:
+// callback should be a function of 6 arguments:
 // - type (int)
 // - bufnr (int)
-// - id (number)
-// - output (str)
-// - diags (tbl)
+// - req_id (number)
 // - defs (tbl)
 // - parse_results (tbl)
+// - eval_batch (tbl or nil)
 int lua_set_callback(lua_State* L) {
 	if (!lua_isfunction(L, 1)) {
 		luaL_error(L, "expected function as arg 1");
@@ -367,25 +429,118 @@ static void parse_batch(Calculator* calc, Job& job, JobResult& result) {
 
 // worker thread
 // evaluate an expression
-static bool eval_line(Calculator* calc, Job& job, JobResult& result) {
+static bool eval_line(
+	Calculator* calc,
+	const EvalInput& input,
+	EvalResult& result
+) {
+	Job options_job;
 	auto started_at = std::chrono::steady_clock::now();
 	result.output = calc->calculateAndPrint(
-		job.payload,
+		input.expr,
 		EVAL_TIMEOUT_MS,
-		job.get_eval_options(),
-		job.get_print_options()
+		options_job.get_eval_options(),
+		options_job.get_print_options()
 	);
 	auto elapsed = std::chrono::steady_clock::now() - started_at;
 	get_diags(calc, result.diags);
 
 	// for debugging symbol extraction
 	// MathStructure ast;
-	// calc->parse(&ast, job.payload, job.get_parse_options());
+	// calc->parse(&ast, input.expr, options_job.get_parse_options());
 	// get_diags(calc, result);
 	// extract_symbols(calc, ast, result.in_syms, result.out_syms);
 	// result.output = dump_ast(ast);
 
-	return elapsed >= std::chrono::milliseconds(EVAL_TIMEOUT_MS);
+	return result.output == "aborted"
+		|| elapsed >= std::chrono::milliseconds(EVAL_TIMEOUT_MS);
+}
+
+static void append_skipped_results(
+	const std::vector<EvalInput>& inputs,
+	std::size_t first,
+	EvalBatchResult& result,
+	const char* message
+) {
+	for (std::size_t i = first; i < inputs.size(); ++i) {
+		EvalResult skipped;
+		skipped.stmt_id = inputs[i].stmt_id;
+		skipped.diags.push_back({Severity::ERROR, message});
+		result.results.push_back(std::move(skipped));
+	}
+}
+
+static void eval_batch(Calculator* calc, Job& job, JobResult& job_result) {
+	const EvalBatch& batch = job.eval_batch;
+	EvalBatchResult& result = job_result.eval_batch;
+	result.doc_id = batch.doc_id;
+	result.generation = batch.generation;
+	result.complete = true;
+	result.results.reserve(batch.inputs.size());
+
+	try {
+		if (batch.reset) {
+			clear_syms(calc);
+		} else {
+			for (const std::string& symbol : batch.deletions) {
+				delete_sym(calc, symbol);
+			}
+		}
+	} catch (const std::exception& e) {
+		result.complete = false;
+		if (!batch.inputs.empty()) {
+			EvalResult failed;
+			failed.stmt_id = batch.inputs[0].stmt_id;
+			get_diags(calc, failed.diags);
+			failed.diags.push_back({Severity::ERROR, e.what()});
+			result.results.push_back(std::move(failed));
+			append_skipped_results(batch.inputs, 1, result, SKIPPED_FAILURE_MSG);
+		}
+		return;
+	}
+
+	for (std::size_t i = 0; i < batch.inputs.size(); ++i) {
+		const EvalInput& input = batch.inputs[i];
+		EvalResult evaluated;
+		evaluated.stmt_id = input.stmt_id;
+
+		if (!input.error.empty()) {
+			evaluated.diags.push_back({Severity::ERROR, input.error});
+			result.results.push_back(std::move(evaluated));
+			continue;
+		}
+
+		try {
+			if (eval_line(calc, input, evaluated)) {
+				evaluated.output.clear();
+				evaluated.diags.push_back({Severity::ERROR, TIMEOUT_MSG});
+				result.results.push_back(std::move(evaluated));
+				result.complete = false;
+				append_skipped_results(
+					batch.inputs,
+					i + 1,
+					result,
+					SKIPPED_TIMEOUT_MSG
+				);
+				return;
+			}
+		} catch (const std::exception& e) {
+			get_diags(calc, evaluated.diags);
+			evaluated.output.clear();
+			evaluated.diags.push_back({Severity::ERROR, e.what()});
+			result.results.push_back(std::move(evaluated));
+			result.complete = false;
+			append_skipped_results(
+				batch.inputs,
+				i + 1,
+				result,
+				SKIPPED_FAILURE_MSG
+			);
+			return;
+		}
+
+		result.results.push_back(std::move(evaluated));
+	}
 }
 
 // worker thread
@@ -431,29 +586,12 @@ void Worker::main_loop() {
 
 		try {
 			switch (job.type) {
-				// delete and clear don't need to notify lua, they merely mutate the calculator
-				// state for subsequent operations. because these operations were queued in
-				// order we just execute them in order
-				case JobType::DELETE_SYM: {
-					delete_sym(calc, job.payload);
-					continue;
-				}
-				case JobType::CLEAR_SYMS: {
-					clear_syms(calc);
-					continue;
-				}
 				case JobType::PARSE_BATCH: {
 					parse_batch(calc, job, result);
 					break;
 				}
-				case JobType::EVAL_LINE: {
-					bool timed_out = eval_line(calc, job, result);
-
-					if (timed_out) {
-						result.output.clear();
-						result.diags.push_back({Severity::ERROR, TIMEOUT_MSG});
-						purge_eval_queue();
-					}
+				case JobType::EVAL_BATCH: {
+					eval_batch(calc, job, result);
 					break;
 				}
 				case JobType::GET_DEFS: {
@@ -463,9 +601,33 @@ void Worker::main_loop() {
 
 			}
 		} catch (const std::exception& e) {
-			result.output = "";
-			result.diags.clear();
-			result.diags.push_back({Severity::ERROR, e.what()});
+			fprintf(stderr, "qalc worker error: %s\n", e.what());
+			if (job.type == JobType::PARSE_BATCH) {
+				result.parse_results.clear();
+				for (const ParseInput& input : job.parse_inputs) {
+					ParseResult failed;
+					failed.stmt_id = input.stmt_id;
+					failed.diags.push_back({Severity::ERROR, e.what()});
+					result.parse_results.push_back(std::move(failed));
+				}
+			} else if (job.type == JobType::EVAL_BATCH) {
+				result.eval_batch.doc_id = job.eval_batch.doc_id;
+				result.eval_batch.generation = job.eval_batch.generation;
+				result.eval_batch.complete = false;
+				result.eval_batch.results.clear();
+				if (!job.eval_batch.inputs.empty()) {
+					EvalResult failed;
+					failed.stmt_id = job.eval_batch.inputs[0].stmt_id;
+					failed.diags.push_back({Severity::ERROR, e.what()});
+					result.eval_batch.results.push_back(std::move(failed));
+					append_skipped_results(
+						job.eval_batch.inputs,
+						1,
+						result.eval_batch,
+						SKIPPED_FAILURE_MSG
+					);
+				}
+			}
 		}
 
 		// push results and notify main thread
@@ -496,52 +658,27 @@ void Worker::process_results() {
 			// pushes 1 item (the callback)
 			lua_rawgeti(L, LUA_REGISTRYINDEX, callback_ref);
 
-			// pushes 7 args
+			// pushes 6 args
 			lua::push(L,
 				static_cast<int>(res.type),
 				res.bufnr,
-				static_cast<double>(res.id),
-				res.output
+				static_cast<double>(res.id)
 			);
-			lua::make_array<Diagnostic>(L, res.diags, Diagnostic::to_lua);
 			lua::make_array<Definition>(L, res.defs, Definition::to_lua);
 			lua::make_array<ParseResult>(L, res.parse_results, ParseResult::to_lua);
+			if (res.type == JobType::EVAL_BATCH) {
+				EvalBatchResult::to_lua(L, res.eval_batch);
+			} else {
+				lua_pushnil(L);
+			}
 
-			// pops callback + 7 args (8 items)
-			if (lua_pcall(L, 7, 0, 0) != LUA_OK) {
+			// pops callback + 6 args (7 items)
+			if (lua_pcall(L, 6, 0, 0) != LUA_OK) {
 				fprintf(stderr, "qalc error: %s\n", lua_tostring(L, -1));
 				lua_pop(L, 1);
 			}
 		}
 	}
-}
-
-// main thread or worker thread
-void Worker::purge_eval_queue() {
-	std::lock_guard<std::mutex> lock(queue_mutex);
-	std::queue<Job> kept_jobs;
-
-	while (!input.empty()) {
-		Job pending = std::move(input.front());
-		input.pop();
-
-		// only purge evaluations. we should preserve PARSE_BATCH and other jobs so the
-		// depgraph never desyncs from calculator memory
-		if (pending.type == JobType::EVAL_LINE) {
-			JobResult result;
-			result.type = pending.type;
-			result.bufnr = pending.bufnr;
-			result.id = pending.id;
-			result.output = "";
-			result.diags.push_back({Severity::ERROR, PURGED_TIMEOUT_MSG});
-
-			output.push(std::move(result));
-		} else {
-			kept_jobs.push(std::move(pending));
-		}
-	}
-
-	input = std::move(kept_jobs);
 }
 
 // main thread

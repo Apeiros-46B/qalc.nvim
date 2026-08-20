@@ -27,17 +27,16 @@ void init(lua_State* L);
 
 // called from lua
 int lua_init_loop(lua_State* L);
+int lua_get_defs(lua_State* L);
+int lua_submit_eval_batch(lua_State* L);
 int lua_submit_parse_batch(lua_State* L);
-int lua_submit_job(lua_State* L);
 int lua_set_callback(lua_State* L);
 
 // matches enum in util.lua
 enum class JobType: int {
-	DELETE_SYM = 1,
-	CLEAR_SYMS = 2,
-	PARSE_BATCH = 3,
-	EVAL_LINE = 4,
-	GET_DEFS = 5,
+	PARSE_BATCH = 1,
+	EVAL_BATCH = 2,
+	GET_DEFS = 3,
 };
 
 struct Diagnostic {
@@ -62,18 +61,45 @@ struct ParseResult {
 	static void to_lua(lua_State* L, ParseResult& self);
 };
 
+struct EvalInput {
+	std::uint64_t stmt_id;
+	std::string expr;
+	std::string error;
+};
+
+struct EvalResult {
+	std::uint64_t stmt_id;
+	std::string output;
+	std::vector<Diagnostic> diags;
+
+	static void to_lua(lua_State* L, EvalResult& self);
+};
+
+struct EvalBatch {
+	std::uint64_t doc_id = 0;
+	std::uint64_t generation = 0;
+	bool reset = false;
+	std::vector<std::string> deletions;
+	std::vector<EvalInput> inputs;
+};
+
+struct EvalBatchResult {
+	std::uint64_t doc_id = 0;
+	std::uint64_t generation = 0;
+	bool complete = false;
+	std::vector<EvalResult> results;
+
+	static void to_lua(lua_State* L, EvalBatchResult& self);
+};
+
 // TODO: take in print options
 struct Job {
 	JobType type = JobType::GET_DEFS;
 	int bufnr = 0;
 	std::uint64_t id = 0;
 
-	// when type is DELETE_SYM, payload = the symbol to delete
-	// when type is CLEAR_SYMS, payload = undefined
-	// when type is EVAL_LINE, payload = the line to eval
-	// otherwise undefined
-	std::string payload;
 	std::vector<ParseInput> parse_inputs;
+	EvalBatch eval_batch;
 
 	ParseOptions get_parse_options();
 	PrintOptions get_print_options();
@@ -81,20 +107,13 @@ struct Job {
 };
 
 struct JobResult {
-	// can never be DELETE_SYM or CLEAR_SYMS, they return no results
 	JobType type;
 	int bufnr;
 	std::uint64_t id;
 
-	// when type is EVAL_LINE, output = calculation result
-	// otherwise undefined
-	std::string output;
-
-	// empty unless type is EVAL_LINE
-	std::vector<Diagnostic> diags;
-
 	// empty unless type is PARSE_BATCH
 	std::vector<ParseResult> parse_results;
+	EvalBatchResult eval_batch;
 
 	// empty unless type is GET_DEFS
 	std::vector<Definition> defs;
@@ -128,7 +147,6 @@ private:
 
 	void main_loop();
 	void process_results();
-	void purge_eval_queue();
 
 	static void callback(uv_async_t* handle);
 

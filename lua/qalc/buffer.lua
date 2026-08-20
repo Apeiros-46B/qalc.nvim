@@ -37,17 +37,6 @@ local function new_buf_state(bufnr, lines)
 	}
 end
 
-local function has_timeout(diags)
-	for _, diag in ipairs(diags or {}) do
-		if diag.message == 'Calculation took too long'
-			or diag.message == 'Dependent calculation took too long'
-		then
-			return true
-		end
-	end
-	return false
-end
-
 local start_eval
 local rebuild
 
@@ -129,42 +118,11 @@ local function finish_eval(complete)
 	end
 end
 
-local function handle_eval_result(bufnr, stmt_id, output, diags)
-	local inflight = eval_inflight
-	if not inflight or inflight.state.bufnr ~= bufnr then return end
-	if not inflight.pending[stmt_id] then return end
-
-	inflight.pending[stmt_id] = nil
-	inflight.pending_count = inflight.pending_count - 1
-	if has_timeout(diags) then inflight.complete = false end
-
-	inflight.results[#inflight.results+1] = {
-		stmt_id = stmt_id,
-		output = output,
-		diags = diags,
-	}
-
-	if inflight.pending_count == 0 then
-		finish_eval(inflight.complete)
-	end
-end
-
 start_eval = function(state, graph)
 	local reset = not calculator_valid or committed_bufnr ~= state.bufnr
 	local base = reset and nil or committed_graph
 	local plan = Depgraph.plan(graph, base, state.needs_refresh)
 	state.needs_refresh = false
-
-	local bridge = require('qalc.bridge')
-	if reset then
-		bridge.submit(util.JobType.CLEAR_SYMS, state.bufnr, -1, '')
-	else
-		local syms = vim.tbl_keys(plan.deletions)
-		table.sort(syms)
-		for _, sym in ipairs(syms) do
-			bridge.submit(util.JobType.DELETE_SYM, state.bufnr, -1, sym)
-		end
-	end
 
 	local pending = {}
 	for _, id in ipairs(plan.eval_ord) do
@@ -190,26 +148,34 @@ start_eval = function(state, graph)
 		state = state,
 		graph = graph,
 		generation = state.doc.generation,
-		pending = pending,
-		pending_count = #plan.eval_ord,
 		results = {},
-		complete = true,
 	}
 
+	local evals = {}
 	for _, id in ipairs(plan.eval_ord) do
-		local stmt = state.doc:get(id)
-		if stmt then
+		local statement = state.doc:get(id)
+		if statement then
 			local expr = graph.nodes[id].norm_expr
 			if not expr or expr == '' then
-				expr = stmt.text
+				expr = statement.text
 			end
-			bridge.submit(util.JobType.EVAL_LINE, state.bufnr, id, expr)
+			evals[#evals+1] = {
+				stmt_id = id,
+				expr = expr,
+			}
 		end
 	end
 
-	if eval_inflight and eval_inflight.pending_count == 0 then
-		finish_eval(true)
-	end
+	local deletions = vim.tbl_keys(plan.deletions)
+	table.sort(deletions)
+	require('qalc.bridge').submit_eval_batch(
+		state.bufnr,
+		state.doc.doc_id,
+		state.doc.generation,
+		reset,
+		deletions,
+		evals
+	)
 end
 
 local function request_eval(state, graph)
@@ -423,6 +389,17 @@ util.connect_signal('parse_batch_done', function(bufnr, req_id, results)
 	end
 end)
 
-util.connect_signal('eval_done', handle_eval_result)
+util.connect_signal('eval_batch_done', function(bufnr, result)
+	local inflight = eval_inflight
+	if not inflight or inflight.state.bufnr ~= bufnr then return end
+	if result.doc_id ~= inflight.state.doc.doc_id
+		or result.generation ~= inflight.generation
+	then
+		return
+	end
+
+	inflight.results = result.results
+	finish_eval(result.complete)
+end)
 
 return M
