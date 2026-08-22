@@ -38,6 +38,8 @@ local function new_buf_state(bufnr, lines)
 end
 
 local start_eval
+local handle_parse_batch
+local handle_eval_batch
 local rebuild
 
 -- parse all unresolved statements, then rebuild and evaluate one coherent graph snapshot.
@@ -199,6 +201,47 @@ rebuild = function(state)
 	request_eval(state, state.graph)
 end
 
+handle_parse_batch = function(bufnr, req_id, results)
+	local finished = parse_inflight
+	if not finished or finished.req_id ~= req_id then return end
+	parse_inflight = nil
+
+	local state = M.attached_bufs[bufnr]
+	if state == finished.state and M.is_active(bufnr) then
+		for _, result in ipairs(results) do
+			local stmt = state.doc:get(result.stmt_id)
+			if stmt then
+				stmt.parsed = {
+					outputs = result.outputs,
+					in_syms = result.in_syms,
+					norm_expr = result.norm_expr,
+					diags = result.diags,
+				}
+			end
+		end
+	elseif state == finished.state then
+		state.needs_initialization = true
+	end
+
+	local active_state = M.attached_bufs[cur_active_buf]
+	if active_state and not active_state.needs_initialization then
+		request_parse(active_state)
+	end
+end
+
+handle_eval_batch = function(bufnr, result)
+	local inflight = eval_inflight
+	if not inflight or inflight.state.bufnr ~= bufnr then return end
+	if result.doc_id ~= inflight.state.doc.doc_id
+		or result.generation ~= inflight.generation
+	then
+		return
+	end
+
+	inflight.results = result.results
+	finish_eval(result.complete)
+end
+
 function M.new_buf(name)
 	if not name or name == '' then
 		name = cfg.bufname
@@ -236,8 +279,11 @@ function M.hard_reset(bufnr)
 	end
 
 	cur_active_buf = bufnr
-	bridge.register_callback(M.attached_bufs)
-
+	bridge.register_callback(
+		M.attached_bufs,
+		handle_parse_batch,
+		handle_eval_batch
+	)
 	require('qalc.output').clear_all(bufnr)
 
 	local state = new_buf_state(bufnr)
@@ -360,46 +406,5 @@ function M.get_graph(bufnr)
 	local state = M.attached_bufs[bufnr]
 	return state and state.graph
 end
-
-util.connect_signal('parse_batch_done', function(bufnr, req_id, results)
-	local finished = parse_inflight
-	if not finished or finished.req_id ~= req_id then return end
-	parse_inflight = nil
-
-	local state = M.attached_bufs[bufnr]
-	if state == finished.state and M.is_active(bufnr) then
-		for _, result in ipairs(results) do
-			local stmt = state.doc:get(result.stmt_id)
-			if stmt then
-				stmt.parsed = {
-					outputs = result.outputs,
-					in_syms = result.in_syms,
-					norm_expr = result.norm_expr,
-					diags = result.diags,
-				}
-			end
-		end
-	elseif state == finished.state then
-		state.needs_initialization = true
-	end
-
-	local active_state = M.attached_bufs[cur_active_buf]
-	if active_state and not active_state.needs_initialization then
-		request_parse(active_state)
-	end
-end)
-
-util.connect_signal('eval_batch_done', function(bufnr, result)
-	local inflight = eval_inflight
-	if not inflight or inflight.state.bufnr ~= bufnr then return end
-	if result.doc_id ~= inflight.state.doc.doc_id
-		or result.generation ~= inflight.generation
-	then
-		return
-	end
-
-	inflight.results = result.results
-	finish_eval(result.complete)
-end)
 
 return M

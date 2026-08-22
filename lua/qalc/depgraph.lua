@@ -51,8 +51,8 @@ function M.build(stmts)
 		local parsed = stmt.parsed
 		if parsed and not parsed.skip then
 			local node = {
-				stmt = stmt,
 				decl_outputs = parsed.outputs or {},
+				decl_inputs = parsed.in_syms or {},
 				outputs = {},
 				in_syms = {},
 				norm_expr = parsed.norm_expr,
@@ -98,7 +98,7 @@ function M.build(stmts)
 			own_symbols[def.ref_name] = true
 		end
 
-		for _, sym in ipairs(node.stmt.parsed.in_syms or {}) do
+		for _, sym in ipairs(node.decl_inputs) do
 			if not own_symbols[sym] and not seen_in_syms[sym] then
 				seen_in_syms[sym] = true
 				node.in_syms[#node.in_syms+1] = sym

@@ -186,7 +186,7 @@ int lua_submit_parse_batch(lua_State* L) {
 	Job job;
 	job.type = JobType::PARSE_BATCH;
 	job.bufnr = bufnr;
-	job.id = req_id;
+	job.req_id = req_id;
 
 	std::size_t count = lua_objlen(L, 3);
 	job.parse_inputs.reserve(count);
@@ -259,22 +259,19 @@ Worker::Worker(lua_State* L): L{L} {
 	worker_thread = std::thread(&Worker::main_loop, this);
 }
 
-// TODO: extract options. maybe we should set them once through a job and not query them
-// from each job? sending a bunch of options each time seems inefficient unless we plan
-// to support per-line pragmas (which is very difficult)
-ParseOptions Job::get_parse_options() {
+static ParseOptions get_parse_options() {
 	ParseOptions opts;
 	opts.limit_implicit_multiplication = true;
 	return opts;
 }
 
-PrintOptions Job::get_print_options() {
+static PrintOptions get_print_options() {
 	PrintOptions opts;
 	opts.use_unicode_signs = true;
 	return opts;
 }
 
-EvaluationOptions Job::get_eval_options() {
+static EvaluationOptions get_eval_options() {
 	EvaluationOptions opts;
 	opts.parse_options = get_parse_options();
 	return opts;
@@ -389,8 +386,7 @@ static void parse_line(
 	const ParseInput& input,
 	ParseResult& result
 ) {
-	Job options_job;
-	ParseOptions opts = options_job.get_parse_options();
+	ParseOptions opts = get_parse_options();
 	std::string expr = input.text;
 	// thankfully this exists
 	transform_expression_for_equals_save(expr, opts);
@@ -434,21 +430,20 @@ static bool eval_line(
 	const EvalInput& input,
 	EvalResult& result
 ) {
-	Job options_job;
 	auto started_at = std::chrono::steady_clock::now();
 	result.output = calc->calculateAndPrint(
 		input.expr,
 		EVAL_TIMEOUT_MS,
-		options_job.get_eval_options(),
-		options_job.get_print_options()
+		get_eval_options(),
+		get_print_options()
 	);
 	auto elapsed = std::chrono::steady_clock::now() - started_at;
 	get_diags(calc, result.diags);
 
 	// for debugging symbol extraction
 	// MathStructure ast;
-	// calc->parse(&ast, input.expr, options_job.get_parse_options());
-	// get_diags(calc, result);
+	// calc->parse(&ast, input.expr, get_parse_options());
+	// get_diags(calc, result.diags);
 	// extract_symbols(calc, ast, result.in_syms, result.out_syms);
 	// result.output = dump_ast(ast);
 
@@ -545,8 +540,8 @@ static void eval_batch(Calculator* calc, Job& job, JobResult& job_result) {
 
 // worker thread
 // enumerate all global definitions
-static void get_defs(Calculator* calc, Job& job, JobResult& result) {
-	PrintOptions po = job.get_print_options();
+static void get_defs(Calculator* calc, JobResult& result) {
+	PrintOptions po = get_print_options();
 
 	for (auto* func : calc->functions) {
 		push_def(calc, func, po, result.defs);
@@ -582,7 +577,7 @@ void Worker::main_loop() {
 		JobResult result;
 		result.type = job.type;
 		result.bufnr = job.bufnr;
-		result.id = job.id;
+		result.req_id = job.req_id;
 
 		try {
 			switch (job.type) {
@@ -595,7 +590,7 @@ void Worker::main_loop() {
 					break;
 				}
 				case JobType::GET_DEFS: {
-					get_defs(calc, job, result);
+					get_defs(calc, result);
 					break;
 				}
 
@@ -662,7 +657,7 @@ void Worker::process_results() {
 			lua::push(L,
 				static_cast<int>(res.type),
 				res.bufnr,
-				static_cast<double>(res.id)
+				static_cast<double>(res.req_id)
 			);
 			lua::make_array<Definition>(L, res.defs, Definition::to_lua);
 			lua::make_array<ParseResult>(L, res.parse_results, ParseResult::to_lua);

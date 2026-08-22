@@ -174,7 +174,7 @@ local function handle_get_defs(attached_bufs, defs)
 	step_coroutine()
 end
 
-function M.register_callback(attached_bufs)
+function M.register_callback(attached_bufs, on_parse_batch, on_eval_batch)
 	if callback_registered then return end
 	callback_registered = true
 
@@ -189,9 +189,9 @@ function M.register_callback(attached_bufs)
 		eval_batch
 	)
 		if type == util.JobType.PARSE_BATCH then
-			util.emit_signal('parse_batch_done', bufnr, req_id, parse_results)
+			on_parse_batch(bufnr, req_id, parse_results)
 		elseif type == util.JobType.EVAL_BATCH then
-			util.emit_signal('eval_batch_done', bufnr, eval_batch)
+			on_eval_batch(bufnr, eval_batch)
 		elseif type == util.JobType.GET_DEFS then
 			handle_get_defs(attached_bufs, defs)
 		end

@@ -96,20 +96,16 @@ struct EvalBatchResult {
 struct Job {
 	JobType type = JobType::GET_DEFS;
 	int bufnr = 0;
-	std::uint64_t id = 0;
+	std::uint64_t req_id = 0;
 
 	std::vector<ParseInput> parse_inputs;
 	EvalBatch eval_batch;
-
-	ParseOptions get_parse_options();
-	PrintOptions get_print_options();
-	EvaluationOptions get_eval_options();
 };
 
 struct JobResult {
 	JobType type;
 	int bufnr;
-	std::uint64_t id;
+	std::uint64_t req_id;
 
 	// empty unless type is PARSE_BATCH
 	std::vector<ParseResult> parse_results;

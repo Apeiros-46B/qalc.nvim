@@ -47,8 +47,6 @@ function M:apply_edit(first_lnum, old_last_lnum, new_last_lnum)
 	assert(new_last_lnum >= first_lnum, 'invalid new line range')
 
 	local next_lines = {}
-	local removed = {}
-	local added = {}
 
 	for i = 1, first_lnum do
 		next_lines[#next_lines+1] = self.lines[i]
@@ -56,14 +54,12 @@ function M:apply_edit(first_lnum, old_last_lnum, new_last_lnum)
 
 	for i = first_lnum + 1, old_last_lnum do
 		local stmt = self.lines[i]
-		removed[#removed+1] = stmt
 		self.by_id[stmt.id] = nil
 	end
 
 	for _ = first_lnum + 1, new_last_lnum do
 		local stmt = new_stmt(nil)
 		next_lines[#next_lines+1] = stmt
-		added[#added+1] = stmt
 		self.by_id[stmt.id] = stmt
 	end
 
@@ -73,8 +69,6 @@ function M:apply_edit(first_lnum, old_last_lnum, new_last_lnum)
 
 	self.lines = next_lines
 	self.generation = self.generation + 1
-
-	return removed, added
 end
 
 function M:settle(lines)
