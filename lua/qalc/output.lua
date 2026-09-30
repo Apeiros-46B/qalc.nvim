@@ -28,7 +28,7 @@ local function flush_diags(state)
 		end
 	end
 
-	vim.diagnostic.set(util.ns_ui, state.bufnr, all_diags)
+	vim.diagnostic.set(util.ns, state.bufnr, all_diags)
 end
 
 local function should_show_result(stmt, output)
@@ -73,7 +73,7 @@ end
 
 function M.clear_all(bufnr)
 	if not vim.api.nvim_buf_is_valid(bufnr) then return end
-	vim.diagnostic.set(util.ns_ui, bufnr, {})
+	vim.diagnostic.set(util.ns, bufnr, {})
 	vim.cmd('redraw!')
 end
 
@@ -93,7 +93,7 @@ function M.yank_result(register)
 end
 
 -- use ephemeral extmarks so display state stays independent of buffer edits
-vim.api.nvim_set_decoration_provider(util.ns_ui, {
+vim.api.nvim_set_decoration_provider(util.ns, {
 	on_win = function(_, _, bufnr, _, _)
 		return require('qalc.buffer').get_state(bufnr) ~= nil
 	end,
@@ -114,7 +114,7 @@ vim.api.nvim_set_decoration_provider(util.ns_ui, {
 					virt_text[#virt_text+1] = { cfg.display.sign .. ' ', cfg._sign_hl }
 				end
 				virt_text[#virt_text+1] = { text, cfg._result_hl }
-				vim.api.nvim_buf_set_extmark(bufnr, util.ns_ui, lnum, 0, {
+				vim.api.nvim_buf_set_extmark(bufnr, util.ns, lnum, 0, {
 					ephemeral = true,
 					virt_text = virt_text,
 					virt_text_pos = 'eol',

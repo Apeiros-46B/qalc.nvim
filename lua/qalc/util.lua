@@ -1,6 +1,6 @@
 local M = {}
 
-M.ns_ui = vim.api.nvim_create_namespace('qalc_ui')
+M.ns = vim.api.nvim_create_namespace('qalc')
 
 M.JobType = {
 	PARSE_BATCH = 1,

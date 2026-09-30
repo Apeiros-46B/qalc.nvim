@@ -16,10 +16,9 @@ function M.attach_lines(lines)
 	vim.cmd.QalcAttach()
 
 	local bufnr = vim.api.nvim_get_current_buf()
-	M.wait_for(
-		function() return require('qalc.buffer').is_ready(bufnr) end,
-		'buffer did not finish initialization'
-	)
+	M.wait_for(function()
+		return require('qalc.buffer').is_ready(bufnr)
+	end, 'buffer did not finish initialization')
 
 	return bufnr
 end
@@ -35,6 +34,37 @@ end
 
 function M.diagnostics(bufnr)
 	return vim.diagnostic.get(bufnr, { namespace = require('qalc.util').ns_ui })
+end
+
+function M.diagnostics_at(bufnr, row)
+	local matches = {}
+	for _, diag in ipairs(M.diagnostics(bufnr)) do
+		if diag.lnum == row - 1 then
+			matches[#matches+1] = diag
+		end
+	end
+	return matches
+end
+
+function M.has_diagnostic(bufnr, row, message)
+	for _, diag in ipairs(M.diagnostics_at(bufnr, row)) do
+		if diag.message:find(message, 1, true) then
+			return true
+		end
+	end
+	return false
+end
+
+function M.graph_diagnostics(bufnr)
+	local matches = {}
+	for _, diag in ipairs(M.diagnostics(bufnr)) do
+		if diag.message:find('Duplicate definition', 1, true)
+			or diag.message:find('Reference cycle', 1, true)
+		then
+			matches[#matches+1] = diag
+		end
+	end
+	return matches
 end
 
 return M

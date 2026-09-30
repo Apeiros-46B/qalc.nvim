@@ -1,0 +1,5 @@
+- [ ] document option setting quirks
+  - [ ] empty options
+  - [ ] runtime print changes
+- [ ] support non-=Options= struct "options" like =assumptions=
+- [ ] multiline display and right align

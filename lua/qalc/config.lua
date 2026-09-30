@@ -1,6 +1,6 @@
 -- handle qalc.nvim configuration
-local ns_ui = vim.api.nvim_create_namespace('qalc_ui')
 local options = require('qalc.options')
+local util = require('qalc.util')
 
 local M = {}
 
@@ -132,7 +132,7 @@ function M.setup(new_cfg)
 	rehighlight()
 
 	if M.cfg.display.diagnostics ~= false then
-		vim.diagnostic.config(M.cfg.display.diagnostics, ns_ui)
+		vim.diagnostic.config(M.cfg.display.diagnostics, util.ns)
 	end
 
 	apply_option_groups(opt_groups)

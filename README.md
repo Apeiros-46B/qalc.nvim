@@ -1,13 +1,3 @@
-> [!IMPORTANT]
-> This branch is not ready for use. There are still a few issues that need to be addressed before it is merged to main.
-
-# TODO
-
-- Implement `display.right_align` and `display.multiline_style`
-- Document option setting, qalc CLI aliases are unsupported
-  - Document empty option resets
-  - Document that runtime print changes do not affect `GET_DEFS` until restart
-
 # qalc.nvim
 
 *inspired by [quickmath.nvim](https://github.com/jbyuki/quickmath.nvim)*
@@ -18,7 +8,7 @@ A Neovim plugin for reactive spreadsheet-like calculations with unit conversions
 
 ## Features
 
-- For supported functions, constants, units, etc, see [the `libqalculate` README](github.com/Qalculate/libqalculate#examples-expressions)
+- For supported functions, constants, units, etc, see [the `libqalculate` README](https://github.com/Qalculate/libqalculate#examples-expressions)
 - Syntax highlighting
 - Plotting (use `plot(f(x))` function)
 - Warnings and errors from expressions are shown as diagnostics
@@ -26,18 +16,13 @@ A Neovim plugin for reactive spreadsheet-like calculations with unit conversions
 
 ## Installation
 
-Requires CMake, LuaJIT, libqalculate, and libuv to be installed. The libuv
-headers and library used to build the plugin must be ABI-compatible with the
-version your Neovim was built with.
+Requires Neovim >=0.12, CMake >=3.10, libqalculate >=5.0.0, LuaJIT, and libuv.
+If you want to use the `plot` feature, you also need gnuplot. The libuv headers
+and library used to build the plugin must be ABI-compatible with the version
+your Neovim was built with.
 
-Install using your preferred plugin manager:
+Install using your preferred plugin manager (example for [lazy.nvim](https://github.com/folke/lazy.nvim)):
 
-- [vim-plug](https://github.com/junegunn/vim-plug)
-```vim
-Plug 'Apeiros-46B/qalc.nvim', { 'do': { -> luafile build.lua } }
-```
-
-- [lazy.nvim](https://github.com/folke/lazy.nvim)
 ```lua
 {
     'Apeiros-46B/qalc.nvim',
@@ -45,19 +30,17 @@ Plug 'Apeiros-46B/qalc.nvim', { 'do': { -> luafile build.lua } }
 }
 ```
 
-You can lazy load if you want (with `ft = 'qalc', cmd = 'Qalc'`) but most of the plugin loading is already deferred.
+You can lazy load if you want (with `ft = 'qalc', cmd = 'Qalc'`) but most of
+the plugin loading is already deferred.
 
 ### cmp integration
 
-Add `{ name = 'qalc' }` to your cmp sources. Loading should work perfectly if you use lazy.nvim. I have not tested cmp integration on other plugin managers.
+Add `{ name = 'qalc' }` to your cmp sources.
 
-### Nix
+### Nix build
 
-If you have [Nix](https://nixos.org/) available on your system, you can use it to build the C++ backend:
-
-```vim
-Plug 'Apeiros-46B/qalc.nvim', { 'do': { -> luafile build_nix.lua } }
-```
+If you have [Nix](https://nixos.org/) available on your system, you can use it
+to build the C++ backend:
 
 ```lua
 {
@@ -69,16 +52,28 @@ Plug 'Apeiros-46B/qalc.nvim', { 'do': { -> luafile build_nix.lua } }
 
 ## Usage
 
-Edit a file with extension `.qalc` or use the `:Qalc` command.
-The `:Qalc` command optionally accepts one argument; the name of the newly created buffer.
+Edit a file with extension `.qalc` or use the `:Qalc` command. The `:Qalc`
+command optionally accepts one argument; the name of the newly created buffer.
 
 Alternatively, you can attach to an existing buffer using `:QalcAttach`.
 
-You can yank the result on the current line with `:QalcYank`, which takes an optional register (see `:h setreg()`). The default register can be configured (see below).
+You can yank the result on the current line with `:QalcYank`, which takes an
+optional register (see `:h setreg()`). The default register can be configured
+(see below).
 
-If the state of the buffer is somehow broken, you can use `:QalcReset` to force a rebuild of the dependency graph and re-evaluate every line.
+If the state of the buffer is somehow broken, you can use `:QalcReset` to force
+a rebuild of the dependency graph and re-evaluate every line.
 
-With the exception of interactive session commands (like `set`, `delete`, `info` etc), all lines are evaluated like `qalc` commands.
+libqalculate's parse, print, and evaluation options can be changed while the
+plugin is running. `:QalcSet` accepts a scoped struct field and a value:
+
+```vim
+:QalcSet parse.angle_unit radians
+:QalcSet print.base hexadecimal
+:QalcSet evaluation.approximation exact
+```
+
+Use `:QalcSet` without arguments to show the current overrides.
 
 ## Potentially unexpected behaviours
 
@@ -94,7 +89,7 @@ With the exception of interactive session commands (like `set`, `delete`, `info`
     and cannot be manually re-enabled, because it causes issues with extracting
     symbol dependencies to build the dependency graph. Numeric implicit
     multiplication (`2x`) or implicit multiplication with a space (`x y`) is
-    still allowed. The `limit_implicit_multiplication` option cannot be overriden.
+    still allowed. The `limit_implicit_multiplication` option cannot be overridden.
   - Unknown-symbol parsing is always enabled so dependency tracking can
     recognize variables before their definitions. The `unknowns_enabled` option
     cannot be overridden.
@@ -102,7 +97,7 @@ With the exception of interactive session commands (like `set`, `delete`, `info`
     namespace even though libqalculate treats them as separate, so don't give a
     function and a variable the same name.
 - The buffer does not evaluate top-down like code; defined variables can
-  referenced anywhere (akin to a 1D spreadsheet with named values).
+  be referenced anywhere (akin to a 1D spreadsheet with named values).
 - If you have multiple large qalc buffers, you may experience some lag when
   switching between them. This is due to a technical limitation of
   `libqalculate` that I unfortunately can't really do anything about.
@@ -130,36 +125,28 @@ To configure, call the `setup` function.
 
 ```lua
 require('qalc').setup({
-    -- your config goes here
+    -- these option groups are overrides, an empty group means use defaults that
+    -- match the default behavior of the `qalc` CLI as closely as possible
+	parse_options = {
+		angle_unit = 'radians',
+	},
+	print_options = {
+		base = 16,
+	},
+	evaluation_options = {
+		approximation = 'exact',
+	},
 })
 ```
-
-Keep in mind that this plugin is still under development so configuration keys may change or be removed at any time.
 
 <details>
   <summary>Default configuration</summary>
 
-  TODO: update this section when configuration is finalized
-
   ```lua
-  local config = {
-      -- extra command arguments for Qalculate
-      -- do NOT use the option `-t`/`--terse`; it will break the plugin
-      -- example: { '--set', 'angle deg' } to use degrees as the default angle unit
-      cmd_args = {}, -- table
-
+  M.cfg = {
       -- default name of a newly opened buffer
       -- set to '' to open an unnamed buffer
       bufname = '', -- string
-
-      -- the plugin will set all attached buffers to have this filetype
-      -- set to '' to disable setting the filetype
-      -- the default is provided for basic syntax highlighting
-      set_ft = 'config', -- string
-
-      -- file extension to automatically attach qalc to
-      -- set to '' to disable automatic attaching
-      attach_extension = '*.qalc', -- string
 
       -- default register to yank results to
       -- default register = '@'
@@ -169,36 +156,50 @@ Keep in mind that this plugin is still under development so configuration keys m
       -- see `:h setreg()`
       yank_default_register = '@', -- string
 
-      -- sign shown before result
-      sign = '=', -- string
+      -- libqalculate options, enum values accept names or integers
+      --> https://qalculate.github.io/reference/structParseOptions.html
+      parse_options = {},
+      --> https://qalculate.github.io/reference/structPrintOptions.html
+      print_options = {},
+      --> https://qalculate.github.io/reference/structEvaluationOptions.html
+      evaluation_options = {},
 
-      -- whether or not to show a sign before the result
-      show_sign = true, -- boolean
+      display = {
+          -- sign shown before result (false to disable)
+          sign = '=', -- string or false
 
-      -- whether or not to right align virtual text
-      right_align = false, -- boolean
+          -- placeholder shown while result is evaluating (false to disable)
+          placeholder = '...', -- string or false
 
-      -- highlight groups
-      highlights = {
-          sign     = '@conceal', -- sign before result
-          result   = '@string',  -- result in virtual text
+          -- whether or not to right align virtual text
+          right_align = false, -- boolean
+
+          -- display style for multiline results
+          -- 'below': virtual lines below
+          -- 'collapse': make multiline results single-line
+          -- 'extend': virtual text at end of line + aligned virtual lines
+          multiline_style = 'below', -- string
+
+          -- highlight groups (see `:h nvim_set_hl()`)
+          highlights = { -- table
+              sign = { link = '@conceal' }, -- sign before result
+              result = { link = '@string' }, -- normal result
+          },
+
+          -- diagnostic options (false to respect the options in your Neovim config)
+          -- (see `:h vim.diagnostic.config()`)
+          diagnostics = { -- table or false
+              underline = true,
+              virtual_text = false,
+              signs = true,
+              update_in_insert = true,
+              severity_sort = true,
+          },
+
+          -- hover options
+          -- (see `:h vim.lsp.util.open_floating_preview.Opts`)
+          hover = {}
       },
-
-      -- diagnostic options
-      -- set to nil to respect the options in your neovim configuration
-      -- (see `:h vim.diagnostic.config()`)
-      diagnostics = { -- table?
-          underline = true,
-          virtual_text = false,
-          signs = true,
-          update_in_insert = true,
-          severity_sort = true,
-      }
   }
   ```
 </details>
-
-## Future Improvements
-
-- Store options in the worker to reduce per-job setup
-- Split option revisions to avoid unrelated retries
