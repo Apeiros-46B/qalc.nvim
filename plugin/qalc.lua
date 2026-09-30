@@ -7,14 +7,17 @@ vim.api.nvim_create_user_command('Qalc',
 	end,
 	{ nargs = '?' }
 )
+
 vim.api.nvim_create_user_command('QalcAttach',
 	function(_) require('qalc.buffer').attach() end,
 	{ nargs = 0 }
 )
+
 vim.api.nvim_create_user_command('QalcReset',
 	function(_) require('qalc.buffer').hard_reset() end,
 	{ nargs = 0 }
 )
+
 vim.api.nvim_create_user_command('QalcYank',
 	function(cmd)
 		local register = cmd.args
@@ -24,6 +27,25 @@ vim.api.nvim_create_user_command('QalcYank',
 		require('qalc.output').yank_result(register)
 	end,
 	{ nargs = '?' }
+)
+
+vim.api.nvim_create_user_command('QalcSet',
+	function(cmd)
+		local config = require('qalc.config')
+		if #cmd.fargs == 0 then
+			config.show_options()
+			return
+		end
+		local value = #cmd.fargs > 1 and table.concat(cmd.fargs, ' ', 2) or nil
+		config.set_option(cmd.fargs[1], value)
+	end,
+
+	{
+		nargs = '*',
+		complete = function(arglead, cmdline, cursorpos)
+			return require('qalc.options').complete(arglead, cmdline, cursorpos)
+		end,
+	}
 )
 
 local augroup = vim.api.nvim_create_augroup('QalcBufferManagement', { clear = true })

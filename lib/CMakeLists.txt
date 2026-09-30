@@ -5,6 +5,8 @@ project(qalcbridge
 	DESCRIPTION "Lua bridge for libqalculate"
 )
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 
 find_package(LibUV REQUIRED)
@@ -14,6 +16,7 @@ find_package(LibQalculate 5.0.0 REQUIRED)
 add_library(${PROJECT_NAME} SHARED
 	src/lib.cpp
 	src/math.cpp
+	src/options.cpp
 	src/util.cpp
 	src/worker.cpp
 )

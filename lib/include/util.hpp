@@ -45,6 +45,11 @@ public:
 
 void dump_stack(lua_State* L);
 
+inline int abs_idx(lua_State* L, int i) {
+	return i < 0 ? lua_gettop(L) + i + 1 : i;
+}
+
+// {{{ userdata wrapper
 template <typename T>
 struct Userdata {
 	template <typename... Args>
@@ -63,7 +68,9 @@ struct Userdata {
 		return reinterpret_cast<T*>(ud);
 	}
 };
+// }}}
 
+// {{{ construction helpers
 inline void push(lua_State* L, int v) {
 	lua_pushinteger(L, v);
 }
@@ -116,18 +123,25 @@ inline void make_array(
 	}
 }
 
+// variadic push
 template<typename T, typename U, typename... Args>
 void push(lua_State* L, T&& first, U&& second, Args&&... args) {
 	push(L, std::forward<T>(first));
 	push(L, std::forward<U>(second), std::forward<Args>(args)...);
 }
+// }}}
 
+// {{{ pop helper
 template<typename T> T pop(lua_State* L, int index);
 
-template<> inline int pop<int>(lua_State* L, int index) {
+template<> inline bool pop(lua_State* L, int index) {
+	luaL_checktype(L, index, LUA_TBOOLEAN);
+	return lua_toboolean(L, index);
+}
+template<> inline int pop(lua_State* L, int index) {
 	return (int)luaL_checkinteger(L, index);
 }
-template<> inline std::string pop<std::string>(lua_State* L, int index) {
+template<> inline std::string pop(lua_State* L, int index) {
 	size_t len;
 	const char* s = luaL_checklstring(L, index, &len);
 	return std::string(s, len);
@@ -139,6 +153,65 @@ template<typename T> T pop_or(lua_State* L, int index, T default_val) {
 	} else {
 		return pop<T>(L, index);
 	}
+}
+// }}}
+
+inline bool get_and_push(lua_State* L, int tbl, const char* k) {
+	lua_getfield(L, tbl, k);
+	if (lua_isnil(L, -1)) {
+		lua_pop(L, 1);
+		return false;
+	}
+	return true;
+}
+
+// specializations should not manipulate the stack
+template<typename T> void _read_inner(lua_State* L, const char* k, T& tgt);
+
+template<> inline void _read_inner(lua_State* L, const char* k, bool& tgt) {
+	luaL_checktype(L, -1, LUA_TBOOLEAN);
+	tgt = lua_toboolean(L, -1);
+}
+
+template<> inline void _read_inner(lua_State* L, const char* k, int& tgt) {
+	tgt = static_cast<int>(luaL_checkinteger(L, -1));
+}
+
+template<> inline void _read_inner(lua_State* L, const char* k, unsigned int& tgt) {
+	lua_Integer v = luaL_checkinteger(L, -1);
+	if (v < 0) luaL_error(L, "%s cannot be negative", k);
+	tgt = static_cast<unsigned int>(v);
+}
+
+template<> inline void _read_inner(lua_State* L, const char* k, std::string& tgt) {
+	size_t sz;
+	const char* v = luaL_checklstring(L, -1, &sz);
+	tgt.assign(v, sz);
+}
+
+template<typename T> void read(lua_State* L, int tbl, const char* k, T& tgt) {
+	if (!get_and_push(L, tbl, k)) return;
+	_read_inner<T>(L, k, tgt);
+	lua_pop(L, 1);
+}
+
+template<typename T> void read_enum(
+	lua_State* L,
+	int tbl,
+	const char* k,
+	int min,
+	int max,
+	T& tgt
+) {
+	if (!get_and_push(L, tbl, k)) return;
+
+	int v = static_cast<int>(luaL_checkinteger(L, -1));
+	if (v < min || v > max) {
+		luaL_error(L, "%s must be between %d and %d", k, min, max);
+	}
+	tgt = static_cast<T>(v);
+
+	lua_pop(L, 1);
 }
 
 }

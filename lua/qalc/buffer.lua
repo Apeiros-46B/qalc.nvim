@@ -1,7 +1,8 @@
 -- handle buffer creation, attach, cleanup, and job submission
-local cfg = require('qalc.config').cfg
+local config = require('qalc.config')
 local util = require('qalc.util')
 
+local cfg = config.cfg
 local Depgraph = require('qalc.depgraph')
 local Document = require('qalc.document')
 
@@ -73,6 +74,7 @@ local function request_parse(state)
 	next_parse_req_id = next_parse_req_id + 1
 	parse_inflight = {
 		req_id = next_parse_req_id,
+		opts_rev = config.opts_rev,
 		state = state,
 	}
 	require('qalc.bridge').submit_parse_batch(
@@ -85,10 +87,14 @@ end
 local function finish_eval(complete)
 	local finished = eval_inflight
 	if not finished then return end
-	if finished.state.doc.generation ~= finished.generation then
+
+	local opts_cur = finished.opts_rev == config.opts_rev
+
+	if finished.state.doc.generation ~= finished.generation or not opts_cur then
 		finished.state.needs_refresh = true
 	elseif M.attached_bufs[finished.state.bufnr] == finished.state then
 		local updates = {}
+
 		for _, result in ipairs(finished.results) do
 			local stmt = finished.state.doc:get(result.stmt_id)
 			if stmt then
@@ -99,10 +105,11 @@ local function finish_eval(complete)
 				}
 			end
 		end
+
 		require('qalc.output').render_batch(finished.state, updates)
 	end
 
-	if complete then
+	if complete and opts_cur then
 		calculator_valid = true
 		committed_bufnr = finished.state.bufnr
 		committed_graph = finished.graph
@@ -150,6 +157,7 @@ start_eval = function(state, graph)
 		state = state,
 		graph = graph,
 		generation = state.doc.generation,
+		opts_rev = config.opts_rev,
 		results = {},
 	}
 
@@ -207,7 +215,9 @@ handle_parse_batch = function(bufnr, req_id, results)
 	parse_inflight = nil
 
 	local state = M.attached_bufs[bufnr]
-	if state == finished.state and M.is_active(bufnr) then
+	local opts_cur = finished.opts_rev == config.opts_rev
+
+	if state == finished.state and M.is_active(bufnr) and opts_cur then
 		for _, result in ipairs(results) do
 			local stmt = state.doc:get(result.stmt_id)
 			if stmt then
@@ -220,7 +230,7 @@ handle_parse_batch = function(bufnr, req_id, results)
 			end
 		end
 	elseif state == finished.state then
-		state.needs_initialization = true
+		state.needs_initialization = not M.is_active(bufnr)
 	end
 
 	local active_state = M.attached_bufs[cur_active_buf]
@@ -232,6 +242,7 @@ end
 handle_eval_batch = function(bufnr, result)
 	local inflight = eval_inflight
 	if not inflight or inflight.state.bufnr ~= bufnr then return end
+
 	if result.doc_id ~= inflight.state.doc.doc_id
 		or result.generation ~= inflight.generation
 	then
@@ -405,6 +416,33 @@ end
 function M.get_graph(bufnr)
 	local state = M.attached_bufs[bufnr]
 	return state and state.graph
+end
+
+function M.options_changed(reparse)
+	calculator_valid = false
+	committed_bufnr = nil
+	committed_graph = nil
+	if reparse then pending_eval = nil end
+
+	for bufnr, state in pairs(M.attached_bufs) do
+		state.needs_refresh = true
+		if reparse then
+			for _, stmt in ipairs(state.doc:records()) do
+				stmt.parsed = nil
+			end
+			state.graph = nil
+			state.is_initializing = true
+			if not M.is_active(bufnr) then state.needs_initialization = true end
+		end
+	end
+
+	local state = M.attached_bufs[cur_active_buf]
+	if not state or not M.is_active(cur_active_buf) then return end
+	if reparse then
+		request_parse(state)
+	elseif state.graph then
+		request_eval(state, state.graph)
+	end
 end
 
 return M

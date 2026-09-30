@@ -3,8 +3,10 @@
 
 # TODO
 
-- Implement a way to alter `ParseOptions`, `PrintOptions`, and `EvaluationOptions` (this is normally done with `set` in the `qalc` program, but qalc.nvim now uses the library directly, so this functionality needs to be separately addressed)
-- `display.right_align` and `display.multiline_style`
+- Implement `display.right_align` and `display.multiline_style`
+- Document option setting, qalc CLI aliases are unsupported
+  - Document empty option resets
+  - Document that runtime print changes do not affect `GET_DEFS` until restart
 
 # qalc.nvim
 
@@ -92,7 +94,10 @@ With the exception of interactive session commands (like `set`, `delete`, `info`
     and cannot be manually re-enabled, because it causes issues with extracting
     symbol dependencies to build the dependency graph. Numeric implicit
     multiplication (`2x`) or implicit multiplication with a space (`x y`) is
-    still allowed.
+    still allowed. The `limit_implicit_multiplication` option cannot be overriden.
+  - Unknown-symbol parsing is always enabled so dependency tracking can
+    recognize variables before their definitions. The `unknowns_enabled` option
+    cannot be overridden.
   - Dependency tracking treats functions and variables as if they were in one
     namespace even though libqalculate treats them as separate, so don't give a
     function and a variable the same name.
@@ -100,14 +105,24 @@ With the exception of interactive session commands (like `set`, `delete`, `info`
   referenced anywhere (akin to a 1D spreadsheet with named values).
 - If you have multiple large qalc buffers, you may experience some lag when
   switching between them. This is due to a technical limitation of
-  `libqalculate` that I unfortunately can't really do anything about. (The
-  `Calculator` struct is a stateful singleton and instantiating more than one
-  leads to a double free, so the plugin has to clear the state and re-evaluate
-  the entire buffer when you switch to it. I tried juggling multiple
-  `Calculator` structs and swapping out the global singleton pointer (which is
-  cleaned up by the destructor) to avoid double frees, but it seems like the
-  state is global anyways and not encapsulated within the struct itself, making
-  multiple instances useless.)
+  `libqalculate` that I unfortunately can't really do anything about.
+
+<details>
+  <summary>Technical details</summary>
+
+  For some reason, the `Calculator` struct in `libqalculate` is a stateful
+  singleton and instantiating more than one leads to a double free when their
+  destructors fire. My workaround in this plugin is to clear the state and
+  re-evaluate the entire buffer when you switch to it, and unfortunately I
+  don't think there's a better way.
+
+  I tried juggling multiple `Calculator` structs and swapping out the global
+  singleton pointer (which the destructor does some cleanup on, from what I
+  could gather), but it seems like the rest of the calculator state like loaded
+  definitions is global anyways and not encapsulated within the struct itself,
+  making multiple instances useless in the first place and making the double
+  free difficult to avoid.
+</details>
 
 ## Configuration
 
@@ -182,3 +197,8 @@ Keep in mind that this plugin is still under development so configuration keys m
   }
   ```
 </details>
+
+## Future Improvements
+
+- Store options in the worker to reduce per-job setup
+- Split option revisions to avoid unrelated retries

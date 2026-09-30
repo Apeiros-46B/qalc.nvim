@@ -28,6 +28,7 @@ constexpr const char* TIMEOUT_MSG = "Calculation exceeded the 2-second time limi
 constexpr const char* SKIPPED_TIMEOUT_MSG = "Calculation skipped because an earlier calculation timed out.";
 constexpr const char* SKIPPED_FAILURE_MSG = "Calculation skipped because the evaluation transaction failed.";
 
+// {{{ lua serialization
 void Diagnostic::to_lua(lua_State* L, const Diagnostic& self) {
 	lua_createtable(L, 0, 2);
 	// :h vim.Diagnostic.Set
@@ -64,7 +65,9 @@ void EvalBatchResult::to_lua(lua_State* L, EvalBatchResult& self) {
 	lua::make_array<EvalResult>(L, self.results, EvalResult::to_lua);
 	lua_setfield(L, -2, "results");
 }
+// }}}
 
+// {{{ other lua plumbing
 void init_mt(lua_State* L) {
 	luaL_newmetatable(L, MT);
 
@@ -112,26 +115,28 @@ int lua_init_loop(lua_State* L) {
 	}
 	return 0;
 }
+// }}}
 
-int lua_get_defs(lua_State*) {
+// {{{ lua-exposed functions
+int lua_get_defs(lua_State* L) {
 	if (worker != nullptr) {
 		Job job;
 		job.type = JobType::GET_DEFS;
+		job.opts.read_lua(L, 1);
 		worker->submit_job(std::move(job));
 	}
 	return 0;
 }
 
-// lib.submit_eval_batch(bufnr, doc_id, generation, reset, deletions, inputs)
+// lib.submit_eval_batch(bufnr, doc_id, generation, reset, deletions, inputs, opts)
 int lua_submit_eval_batch(lua_State* L) {
+	// TODO: cleanup, this is very messy
 	Job job;
 	job.type = JobType::EVAL_BATCH;
 	job.bufnr = lua::pop<int>(L, 1);
 	job.eval_batch.doc_id = static_cast<std::uint64_t>(luaL_checknumber(L, 2));
 	job.eval_batch.generation = static_cast<std::uint64_t>(luaL_checknumber(L, 3));
-
-	luaL_checktype(L, 4, LUA_TBOOLEAN);
-	job.eval_batch.reset = lua_toboolean(L, 4);
+	job.eval_batch.reset = lua::pop<bool>(L, 4);
 
 	luaL_checktype(L, 5, LUA_TTABLE);
 	std::size_t deletion_count = lua_objlen(L, 5);
@@ -170,6 +175,7 @@ int lua_submit_eval_batch(lua_State* L) {
 			std::move(error),
 		});
 	}
+	job.opts.read_lua(L, 7);
 
 	if (worker != nullptr) {
 		worker->submit_job(std::move(job));
@@ -177,7 +183,7 @@ int lua_submit_eval_batch(lua_State* L) {
 	return 0;
 }
 
-// lib.submit_parse_batch(bufnr, req_id, {{ stmt_id, text }, ...})
+// lib.submit_parse_batch(bufnr, req_id, inputs, opts)
 int lua_submit_parse_batch(lua_State* L) {
 	int bufnr = lua::pop<int>(L, 1);
 	std::uint64_t req_id = static_cast<std::uint64_t>(luaL_checknumber(L, 2));
@@ -207,6 +213,7 @@ int lua_submit_parse_batch(lua_State* L) {
 
 		job.parse_inputs.push_back({stmt_id, std::move(text)});
 	}
+	job.opts.read_lua(L, 4);
 
 	if (worker != nullptr) {
 		worker->submit_job(std::move(job));
@@ -234,10 +241,12 @@ int lua_set_callback(lua_State* L) {
 	}
 	return 0;
 }
+// }}}
 
 Worker::Worker(lua_State* L): L{L} {
 	calc = new Calculator();
 	CALCULATOR = calc;
+	calc->setPrecision(10); // qalc CLI's default startup precision
 	calc->loadExchangeRates();
 	calc->loadGlobalDefinitions();
 
@@ -257,24 +266,6 @@ Worker::Worker(lua_State* L): L{L} {
 
 	running.store(true);
 	worker_thread = std::thread(&Worker::main_loop, this);
-}
-
-static ParseOptions get_parse_options() {
-	ParseOptions opts;
-	opts.limit_implicit_multiplication = true;
-	return opts;
-}
-
-static PrintOptions get_print_options() {
-	PrintOptions opts;
-	opts.use_unicode_signs = true;
-	return opts;
-}
-
-static EvaluationOptions get_eval_options() {
-	EvaluationOptions opts;
-	opts.parse_options = get_parse_options();
-	return opts;
 }
 
 Worker::~Worker() {
@@ -323,6 +314,7 @@ void Worker::submit_job(Job&& job) {
 	cv.notify_one();
 }
 
+// {{{ request handlers
 // worker thread
 static void get_diags(
 	Calculator* calc,
@@ -384,9 +376,9 @@ static void clear_syms(Calculator* calc) {
 static void parse_line(
 	Calculator* calc,
 	const ParseInput& input,
-	ParseResult& result
+	ParseResult& result,
+	const ParseOptions& opts
 ) {
-	ParseOptions opts = get_parse_options();
 	std::string expr = input.text;
 	// thankfully this exists
 	transform_expression_for_equals_save(expr, opts);
@@ -408,17 +400,22 @@ static void parse_line(
 	extract_fn_calls(calc, input.text, result.in_syms);
 }
 
+// worker thread
+// parse a job's batch of exprs. see parse_line
 static void parse_batch(Calculator* calc, Job& job, JobResult& result) {
 	result.parse_results.reserve(job.parse_inputs.size());
+
 	for (const ParseInput& input : job.parse_inputs) {
 		ParseResult parsed;
 		parsed.stmt_id = input.stmt_id;
+
 		try {
-			parse_line(calc, input, parsed);
+			parse_line(calc, input, parsed, job.opts.parse);
 		} catch (const std::exception& e) {
 			get_diags(calc, parsed.diags);
 			parsed.diags.push_back({Severity::ERROR, e.what()});
 		}
+
 		result.parse_results.push_back(std::move(parsed));
 	}
 }
@@ -428,21 +425,23 @@ static void parse_batch(Calculator* calc, Job& job, JobResult& result) {
 static bool eval_line(
 	Calculator* calc,
 	const EvalInput& input,
-	EvalResult& result
+	EvalResult& result,
+	const Options& opts
 ) {
 	auto started_at = std::chrono::steady_clock::now();
 	result.output = calc->calculateAndPrint(
 		input.expr,
 		EVAL_TIMEOUT_MS,
-		get_eval_options(),
-		get_print_options()
+		opts.eval,
+		opts.print
 	);
 	auto elapsed = std::chrono::steady_clock::now() - started_at;
+
 	get_diags(calc, result.diags);
 
 	// for debugging symbol extraction
 	// MathStructure ast;
-	// calc->parse(&ast, input.expr, get_parse_options());
+	// calc->parse(&ast, input.expr, opts.parse);
 	// get_diags(calc, result.diags);
 	// extract_symbols(calc, ast, result.in_syms, result.out_syms);
 	// result.output = dump_ast(ast);
@@ -461,18 +460,24 @@ static void append_skipped_results(
 		EvalResult skipped;
 		skipped.stmt_id = inputs[i].stmt_id;
 		skipped.diags.push_back({Severity::ERROR, message});
+
 		result.results.push_back(std::move(skipped));
 	}
 }
 
+// worker thread
+// evaluate a job's batch of exprs. see eval_line
 static void eval_batch(Calculator* calc, Job& job, JobResult& job_result) {
+	// TODO: very defensive err handling code can probably be cleaned up somehow
 	const EvalBatch& batch = job.eval_batch;
+
 	EvalBatchResult& result = job_result.eval_batch;
 	result.doc_id = batch.doc_id;
 	result.generation = batch.generation;
 	result.complete = true;
 	result.results.reserve(batch.inputs.size());
 
+	// pre cleanup
 	try {
 		if (batch.reset) {
 			clear_syms(calc);
@@ -483,19 +488,24 @@ static void eval_batch(Calculator* calc, Job& job, JobResult& job_result) {
 		}
 	} catch (const std::exception& e) {
 		result.complete = false;
+
 		if (!batch.inputs.empty()) {
 			EvalResult failed;
 			failed.stmt_id = batch.inputs[0].stmt_id;
+
 			get_diags(calc, failed.diags);
 			failed.diags.push_back({Severity::ERROR, e.what()});
+
 			result.results.push_back(std::move(failed));
 			append_skipped_results(batch.inputs, 1, result, SKIPPED_FAILURE_MSG);
 		}
 		return;
 	}
 
+	// eval each expr
 	for (std::size_t i = 0; i < batch.inputs.size(); ++i) {
 		const EvalInput& input = batch.inputs[i];
+
 		EvalResult evaluated;
 		evaluated.stmt_id = input.stmt_id;
 
@@ -506,9 +516,10 @@ static void eval_batch(Calculator* calc, Job& job, JobResult& job_result) {
 		}
 
 		try {
-			if (eval_line(calc, input, evaluated)) {
-				evaluated.output.clear();
+			if (eval_line(calc, input, evaluated, job.opts)) {
 				evaluated.diags.push_back({Severity::ERROR, TIMEOUT_MSG});
+				evaluated.output.clear();
+
 				result.results.push_back(std::move(evaluated));
 				result.complete = false;
 				append_skipped_results(
@@ -517,12 +528,14 @@ static void eval_batch(Calculator* calc, Job& job, JobResult& job_result) {
 					result,
 					SKIPPED_TIMEOUT_MSG
 				);
+
 				return;
 			}
 		} catch (const std::exception& e) {
 			get_diags(calc, evaluated.diags);
-			evaluated.output.clear();
 			evaluated.diags.push_back({Severity::ERROR, e.what()});
+			evaluated.output.clear();
+
 			result.results.push_back(std::move(evaluated));
 			result.complete = false;
 			append_skipped_results(
@@ -540,23 +553,27 @@ static void eval_batch(Calculator* calc, Job& job, JobResult& job_result) {
 
 // worker thread
 // enumerate all global definitions
-static void get_defs(Calculator* calc, JobResult& result) {
-	PrintOptions po = get_print_options();
-
+static void get_defs(
+	Calculator* calc,
+	JobResult& result,
+	const PrintOptions& opts
+) {
 	for (auto* func : calc->functions) {
-		push_def(calc, func, po, result.defs);
+		push_def(calc, func, opts, result.defs);
 	}
 	for (auto* var : calc->variables) {
-		push_def(calc, var, po, result.defs);
+		push_def(calc, var, opts, result.defs);
 	}
 	for (auto* unit : calc->units) {
-		push_def(calc, unit, po, result.defs);
+		push_def(calc, unit, opts, result.defs);
 	}
 	for (auto* pref : calc->prefixes) {
-		push_prefix_def(calc, pref, po, result.defs);
+		push_prefix_def(calc, pref, opts, result.defs);
 	}
 }
+// }}}
 
+// {{{ process requests
 // worker thread
 void Worker::main_loop() {
 	while (true) {
@@ -590,15 +607,16 @@ void Worker::main_loop() {
 					break;
 				}
 				case JobType::GET_DEFS: {
-					get_defs(calc, result);
+					get_defs(calc, result, job.opts.print);
 					break;
 				}
-
 			}
 		} catch (const std::exception& e) {
 			fprintf(stderr, "qalc worker error: %s\n", e.what());
+
 			if (job.type == JobType::PARSE_BATCH) {
 				result.parse_results.clear();
+
 				for (const ParseInput& input : job.parse_inputs) {
 					ParseResult failed;
 					failed.stmt_id = input.stmt_id;
@@ -610,10 +628,12 @@ void Worker::main_loop() {
 				result.eval_batch.generation = job.eval_batch.generation;
 				result.eval_batch.complete = false;
 				result.eval_batch.results.clear();
+
 				if (!job.eval_batch.inputs.empty()) {
 					EvalResult failed;
 					failed.stmt_id = job.eval_batch.inputs[0].stmt_id;
 					failed.diags.push_back({Severity::ERROR, e.what()});
+
 					result.eval_batch.results.push_back(std::move(failed));
 					append_skipped_results(
 						job.eval_batch.inputs,
@@ -681,5 +701,6 @@ void Worker::callback(uv_async_t* handle) {
 	Worker* self = static_cast<Worker*>(handle->data);
 	self->process_results();
 }
+// }}}
 
 }

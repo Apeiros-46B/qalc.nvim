@@ -17,6 +17,7 @@ extern "C" {
 #include <uv.h>
 
 #include "math.hpp"
+#include "options.hpp"
 #include "util.hpp"
 
 namespace worker {
@@ -92,7 +93,6 @@ struct EvalBatchResult {
 	static void to_lua(lua_State* L, EvalBatchResult& self);
 };
 
-// TODO: take in print options
 struct Job {
 	JobType type = JobType::GET_DEFS;
 	int bufnr = 0;
@@ -100,6 +100,7 @@ struct Job {
 
 	std::vector<ParseInput> parse_inputs;
 	EvalBatch eval_batch;
+	Options opts;
 };
 
 struct JobResult {

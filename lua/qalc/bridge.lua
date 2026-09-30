@@ -35,7 +35,12 @@ function M.submit_parse_batch(bufnr, req_id, stmts)
 			text = text,
 		}
 	end
-	require('qalc.lib').submit_parse_batch(bufnr, req_id, inputs)
+	require('qalc.lib').submit_parse_batch(
+		bufnr,
+		req_id,
+		inputs,
+		require('qalc.config').options_snapshot()
+	)
 end
 
 function M.submit_eval_batch(
@@ -65,7 +70,8 @@ function M.submit_eval_batch(
 		generation,
 		reset,
 		deletions,
-		inputs
+		inputs,
+		require('qalc.config').options_snapshot()
 	)
 end
 
@@ -203,7 +209,7 @@ function M.register_callback(attached_bufs, on_parse_batch, on_eval_batch)
 	dummy:close()
 
 	lib.set_callback(vim.schedule_wrap(handle_job))
-	lib.get_defs()
+	lib.get_defs(require('qalc.config').options_snapshot())
 end
 
 -- get definitions of a word, which may be a prefix + unit combination
