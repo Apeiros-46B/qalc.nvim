@@ -3,6 +3,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <string>
@@ -28,6 +29,7 @@ void init(lua_State* L);
 
 // called from lua
 int lua_init_loop(lua_State* L);
+int lua_update_config(lua_State* L);
 int lua_get_defs(lua_State* L);
 int lua_submit_eval_batch(lua_State* L);
 int lua_submit_parse_batch(lua_State* L);
@@ -38,6 +40,7 @@ enum class JobType: int {
 	PARSE_BATCH = 1,
 	EVAL_BATCH = 2,
 	GET_DEFS = 3,
+	UPDATE_CONFIG = 4,
 };
 
 struct Diagnostic {
@@ -93,6 +96,7 @@ struct EvalBatchResult {
 	static void to_lua(lua_State* L, EvalBatchResult& self);
 };
 
+// TODO: this should probably be a tagged union instead?
 struct Job {
 	JobType type = JobType::GET_DEFS;
 	int bufnr = 0;
@@ -100,7 +104,9 @@ struct Job {
 
 	std::vector<ParseInput> parse_inputs;
 	EvalBatch eval_batch;
-	Options opts;
+
+	// only UPDATE_CONFIG jobs have this
+	std::unique_ptr<Options> opts;
 };
 
 struct JobResult {
@@ -141,6 +147,7 @@ private:
 
 	// this is the only calculator instance we can use
 	Calculator* calc = nullptr;
+	Options opts;
 
 	void main_loop();
 	void process_results();

@@ -36,8 +36,8 @@ vim.api.nvim_create_user_command('QalcSet',
 			config.show_options()
 			return
 		end
-		local value = #cmd.fargs > 1 and table.concat(cmd.fargs, ' ', 2) or nil
-		config.set_option(cmd.fargs[1], value)
+		if #cmd.fargs > 2 then error('qalc: expected QalcSet [option [value]]') end
+		config.set_option(cmd.fargs[1], cmd.fargs[2])
 	end,
 
 	{

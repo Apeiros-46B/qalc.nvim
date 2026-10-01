@@ -118,17 +118,28 @@ int lua_init_loop(lua_State* L) {
 // }}}
 
 // {{{ lua-exposed functions
-int lua_get_defs(lua_State* L) {
+// lib.update_config(overrides)
+int lua_update_config(lua_State* L) {
 	if (worker != nullptr) {
 		Job job;
-		job.type = JobType::GET_DEFS;
-		job.opts.read_lua(L, 1);
+		job.type = JobType::UPDATE_CONFIG;
+		job.opts.reset(new Options());
+		job.opts->read_lua(L, 1);
 		worker->submit_job(std::move(job));
 	}
 	return 0;
 }
 
-// lib.submit_eval_batch(bufnr, doc_id, generation, reset, deletions, inputs, opts)
+int lua_get_defs(lua_State* L) {
+	if (worker != nullptr) {
+		Job job;
+		job.type = JobType::GET_DEFS;
+		worker->submit_job(std::move(job));
+	}
+	return 0;
+}
+
+// lib.submit_eval_batch(bufnr, doc_id, generation, reset, deletions, inputs)
 int lua_submit_eval_batch(lua_State* L) {
 	// TODO: cleanup, this is very messy
 	Job job;
@@ -175,7 +186,6 @@ int lua_submit_eval_batch(lua_State* L) {
 			std::move(error),
 		});
 	}
-	job.opts.read_lua(L, 7);
 
 	if (worker != nullptr) {
 		worker->submit_job(std::move(job));
@@ -183,7 +193,7 @@ int lua_submit_eval_batch(lua_State* L) {
 	return 0;
 }
 
-// lib.submit_parse_batch(bufnr, req_id, inputs, opts)
+// lib.submit_parse_batch(bufnr, req_id, inputs)
 int lua_submit_parse_batch(lua_State* L) {
 	int bufnr = lua::pop<int>(L, 1);
 	std::uint64_t req_id = static_cast<std::uint64_t>(luaL_checknumber(L, 2));
@@ -213,7 +223,6 @@ int lua_submit_parse_batch(lua_State* L) {
 
 		job.parse_inputs.push_back({stmt_id, std::move(text)});
 	}
-	job.opts.read_lua(L, 4);
 
 	if (worker != nullptr) {
 		worker->submit_job(std::move(job));
@@ -246,9 +255,12 @@ int lua_set_callback(lua_State* L) {
 Worker::Worker(lua_State* L): L{L} {
 	calc = new Calculator();
 	CALCULATOR = calc;
+
 	calc->setPrecision(10); // qalc CLI's default startup precision
 	calc->loadExchangeRates();
 	calc->loadGlobalDefinitions();
+
+	opts.set_startup_locale(calc);
 
 	// SECURITY: remove "command" function
 	// risk of RCE since it allows qalc files to execute arbitrary shell commands
@@ -379,7 +391,9 @@ static void parse_line(
 	ParseResult& result,
 	const ParseOptions& opts
 ) {
-	std::string expr = input.text;
+	// convert locale separators before parsing
+	std::string expr = calc->unlocalizeExpression(input.text, opts);
+
 	// thankfully this exists
 	transform_expression_for_equals_save(expr, opts);
 
@@ -402,7 +416,12 @@ static void parse_line(
 
 // worker thread
 // parse a job's batch of exprs. see parse_line
-static void parse_batch(Calculator* calc, Job& job, JobResult& result) {
+static void parse_batch(
+	Calculator* calc,
+	Job& job,
+	JobResult& result,
+	const ParseOptions& opts
+) {
 	result.parse_results.reserve(job.parse_inputs.size());
 
 	for (const ParseInput& input : job.parse_inputs) {
@@ -410,7 +429,7 @@ static void parse_batch(Calculator* calc, Job& job, JobResult& result) {
 		parsed.stmt_id = input.stmt_id;
 
 		try {
-			parse_line(calc, input, parsed, job.opts.parse);
+			parse_line(calc, input, parsed, opts);
 		} catch (const std::exception& e) {
 			get_diags(calc, parsed.diags);
 			parsed.diags.push_back({Severity::ERROR, e.what()});
@@ -433,7 +452,9 @@ static bool eval_line(
 		input.expr,
 		EVAL_TIMEOUT_MS,
 		opts.eval,
-		opts.print
+		opts.print,
+		opts.auto_fraction,
+		opts.auto_approximation
 	);
 	auto elapsed = std::chrono::steady_clock::now() - started_at;
 
@@ -467,7 +488,12 @@ static void append_skipped_results(
 
 // worker thread
 // evaluate a job's batch of exprs. see eval_line
-static void eval_batch(Calculator* calc, Job& job, JobResult& job_result) {
+static void eval_batch(
+	Calculator* calc,
+	Job& job,
+	JobResult& job_result,
+	const Options& opts
+) {
 	// TODO: very defensive err handling code can probably be cleaned up somehow
 	const EvalBatch& batch = job.eval_batch;
 
@@ -516,7 +542,7 @@ static void eval_batch(Calculator* calc, Job& job, JobResult& job_result) {
 		}
 
 		try {
-			if (eval_line(calc, input, evaluated, job.opts)) {
+			if (eval_line(calc, input, evaluated, opts)) {
 				evaluated.diags.push_back({Severity::ERROR, TIMEOUT_MSG});
 				evaluated.output.clear();
 
@@ -599,16 +625,21 @@ void Worker::main_loop() {
 		try {
 			switch (job.type) {
 				case JobType::PARSE_BATCH: {
-					parse_batch(calc, job, result);
+					parse_batch(calc, job, result, opts.parse);
 					break;
 				}
 				case JobType::EVAL_BATCH: {
-					eval_batch(calc, job, result);
+					eval_batch(calc, job, result, opts);
 					break;
 				}
 				case JobType::GET_DEFS: {
-					get_defs(calc, result, job.opts.print);
+					get_defs(calc, result, opts.print);
 					break;
+				}
+				case JobType::UPDATE_CONFIG: {
+					opts.take_from(std::move(*job.opts));
+					opts.apply_state(calc);
+					continue;
 				}
 			}
 		} catch (const std::exception& e) {

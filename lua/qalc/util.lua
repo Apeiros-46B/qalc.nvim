@@ -6,6 +6,7 @@ M.JobType = {
 	PARSE_BATCH = 1,
 	EVAL_BATCH = 2,
 	GET_DEFS = 3,
+	UPDATE_CONFIG = 4,
 }
 
 M.LspKind = {

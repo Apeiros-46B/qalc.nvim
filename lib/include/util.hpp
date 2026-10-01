@@ -45,8 +45,8 @@ public:
 
 void dump_stack(lua_State* L);
 
-inline int abs_idx(lua_State* L, int i) {
-	return i < 0 ? lua_gettop(L) + i + 1 : i;
+inline int abs_index(lua_State* L, int index) {
+	return index < 0 ? lua_gettop(L) + index + 1 : index;
 }
 
 // {{{ userdata wrapper

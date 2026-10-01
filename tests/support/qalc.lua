@@ -33,7 +33,7 @@ function M.result_at(row, expected)
 end
 
 function M.diagnostics(bufnr)
-	return vim.diagnostic.get(bufnr, { namespace = require('qalc.util').ns_ui })
+	return vim.diagnostic.get(bufnr, { namespace = require('qalc.util').ns })
 end
 
 function M.diagnostics_at(bufnr, row)

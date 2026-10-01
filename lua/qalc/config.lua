@@ -17,13 +17,9 @@ M.cfg = {
 	-- see `:h setreg()`
 	yank_default_register = '@', -- string
 
-	-- libqalculate options, enum values accept names or integers
-	--> https://qalculate.github.io/reference/structParseOptions.html
-	parse_options = {},
-	--> https://qalculate.github.io/reference/structPrintOptions.html
-	print_options = {},
-	--> https://qalculate.github.io/reference/structEvaluationOptions.html
-	evaluation_options = {},
+	-- qalc CLI-style calculator options (same keys and values as :QalcSet)
+	-- e.g. { angle_unit = 'degrees' }
+	options = {},
 
 	display = {
 		-- sign shown before result (false to disable)
@@ -83,50 +79,22 @@ local function deep_extend_inplace(dest, src)
 	end
 end
 
--- both setup and runtime changes passed as complete opt groups
-local function apply_option_groups(opt_groups)
-	local changed = false
-	local parse_changed = false
+local function apply_options(values)
+	if values == nil or vim.deep_equal(M.cfg.options, values) then return end
 
-	for group, values in pairs(opt_groups) do
-		if not vim.deep_equal(M.cfg[group], values) then
-			M.cfg[group] = values
-			changed = true
-			parse_changed = parse_changed or group == 'parse_options'
-		end
-	end
+	local before = M.options_snapshot()
+	local after = options.snapshot(values)
 
-	if changed then
-		M.opts_rev = M.opts_rev + 1
+	M.cfg.options = values
+	M.opts_rev = M.opts_rev + 1
 
-		-- don't load qalc.buffer if not loaded since we might be in setup.
-		-- if we're in setup we don't need to fire the hook anyway so this is fine
-		local buffer = package.loaded['qalc.buffer']
-		if type(buffer) == 'table' and buffer.options_changed then
-			buffer.options_changed(parse_changed)
-		end
-	end
-end
-
-local function set_keys(tgt, keys, v)
-	for i = 1, #keys - 1 do
-		local k = keys[i]
-
-		if type(tgt[k]) ~= 'table' then
-			-- resetting an absent child should not create an empty parent
-			if v == nil then return end
-			tgt[k] = {}
-		end
-
-		tgt = tgt[k]
-	end
-
-	tgt[keys[#keys]] = v
+	require('qalc.bridge').submit_config_update()
+	require('qalc.buffer').options_changed(options.requires_reparse(before, after))
 end
 
 function M.setup(new_cfg)
-	local opt_groups
-	new_cfg, opt_groups = options.normalize_cfg(new_cfg)
+	local values
+	new_cfg, values = options.normalize_cfg(new_cfg)
 
 	deep_extend_inplace(M.cfg, new_cfg)
 	rehighlight()
@@ -135,37 +103,20 @@ function M.setup(new_cfg)
 		vim.diagnostic.config(M.cfg.display.diagnostics, util.ns)
 	end
 
-	apply_option_groups(opt_groups)
+	apply_options(values)
 end
 
-function M.set_option(path, val)
-	local updates = options.normalize_cmd(path, val)
-	local opt_groups = {}
-
-	for _, update in ipairs(updates) do
-		local group = update.group
-
-		if not opt_groups[group] then
-			opt_groups[group] = vim.deepcopy(M.cfg[group])
-		end
-
-		set_keys(opt_groups[group], update.keys, update.val)
-	end
-
-	apply_option_groups(opt_groups)
+function M.set_option(name, value)
+	apply_options(options.change(M.cfg.options, name, value))
 end
 
 function M.options_snapshot()
-	return {
-		parse = M.cfg.parse_options,
-		print = M.cfg.print_options,
-		evaluation = M.cfg.evaluation_options,
-	}
+	return options.snapshot(M.cfg.options)
 end
 
 function M.show_options()
-	vim.notify(vim.inspect(M.options_snapshot()), vim.log.levels.INFO, {
-		title = 'qalc options',
+	vim.notify(vim.inspect(options.describe(M.cfg.options)), vim.log.levels.INFO, {
+		title = 'qalc options (overrides)',
 	})
 end
 

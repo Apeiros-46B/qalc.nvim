@@ -2,22 +2,25 @@
 
 *inspired by [quickmath.nvim](https://github.com/jbyuki/quickmath.nvim)*
 
-A Neovim plugin for reactive spreadsheet-like calculations with unit conversions, algebra, calculus, graph plotting, and more. Powered by [`libqalculate`](https://github.com/Qalculate/libqalculate).
+A Neovim plugin for reactive spreadsheet-like calculations with unit
+conversions, algebra, calculus, graph plotting, and more. Powered by
+[`libqalculate`](https://github.com/Qalculate/libqalculate).
 
 ![screenshot](assets/screenshot.png)
 
 ## Features
 
-- For supported functions, constants, units, etc, see [the `libqalculate` README](https://github.com/Qalculate/libqalculate#examples-expressions)
+- All mathematical constructs supported by `libqalculate`
+- gnuplot integration (use `plot(f(x))`)
 - Syntax highlighting
-- Plotting (use `plot(f(x))` function)
 - Warnings and errors from expressions are shown as diagnostics
-- [`nvim-cmp`](https://github.com/hrsh7th/nvim-cmp) integration for autocomplete of functions, constants, variables, and units
+- [`nvim-cmp`](https://github.com/hrsh7th/nvim-cmp) integration for
+  autocomplete and documentation of functions, constants, variables, and units
 
 ## Installation
 
 Requires Neovim >=0.12, CMake >=3.10, libqalculate >=5.0.0, LuaJIT, and libuv.
-If you want to use the `plot` feature, you also need gnuplot. The libuv headers
+If you want to use the plotting feature, you also need gnuplot. The libuv headers
 and library used to build the plugin must be ABI-compatible with the version
 your Neovim was built with.
 
@@ -52,72 +55,54 @@ to build the C++ backend:
 
 ## Usage
 
-Edit a file with extension `.qalc` or use the `:Qalc` command. The `:Qalc`
-command optionally accepts one argument; the name of the newly created buffer.
-
-Alternatively, you can attach to an existing buffer using `:QalcAttach`.
+Edit a file with extension `.qalc` or use the `:Qalc` command to create a new
+calculator buffer. The `:Qalc` command optionally accepts one argument for the
+name of the newly created buffer.
 
 You can yank the result on the current line with `:QalcYank`, which takes an
 optional register (see `:h setreg()`). The default register can be configured
 (see below).
 
-If the state of the buffer is somehow broken, you can use `:QalcReset` to force
-a rebuild of the dependency graph and re-evaluate every line.
+If the state of the calculation is somehow broken, you can use `:QalcReset` to
+force a rebuild of the dependency graph and re-evaluate every line. You can
+also attach calculation hooks to an existing buffer using `:QalcAttach`.
 
-libqalculate's parse, print, and evaluation options can be changed while the
-plugin is running. `:QalcSet` accepts a scoped struct field and a value:
+Calculator options can be set using `:QalcSet` with the same option names as
+the `qalc` CLI, (but with spaces replaced by underscores and apostrophes
+removed). Named values also use underscores, such as `half_to_even`,
+`try_exact`, and `golden_ratio`. Tab completion includes option names, aliases,
+and accepted named values.
 
-```vim
-:QalcSet parse.angle_unit radians
-:QalcSet print.base hexadecimal
-:QalcSet evaluation.approximation exact
-```
+Use `:QalcSet` without arguments to show current overrides. Omitting a value
+resets that option to its default. For boolean settings, use explicit
+`true`/`false` values.
 
-Use `:QalcSet` without arguments to show the current overrides.
+## Incompatibilities with the qalc CLI
 
-## Potentially unexpected behaviours
+Due to the `qalc` CLI frontend being extremely complex and this plugin's heavier
+emphasis on reactive recalculation, 1:1 feature parity with it is not a goal.
+Some incompatible behaviors:
 
-- 1:1 feature parity with `qalc` CLI frontend is a non-goal. Calling `qalc` as
-  a subprocess (which was what this plugin used to do) is slow and prone to
-  bugs, and perfectly emulating its behaviour using the C++ library is almost
-  impossible [due to how complex their frontend
-  is](https://github.com/Qalculate/libqalculate/blob/master/src/qalc.cc).
-  Notable features that will not be supported are interactive commands (like
-  `set` and `delete`), `ans` variables, and the legacy `function` syntax (use
-  `f(x) := ...` instead).
-  - Implicit multiplication of symbols (`xy` = `x * y`) is forcibly disabled
-    and cannot be manually re-enabled, because it causes issues with extracting
-    symbol dependencies to build the dependency graph. Numeric implicit
-    multiplication (`2x`) or implicit multiplication with a space (`x y`) is
-    still allowed. The `limit_implicit_multiplication` option cannot be overridden.
-  - Unknown-symbol parsing is always enabled so dependency tracking can
-    recognize variables before their definitions. The `unknowns_enabled` option
-    cannot be overridden.
-  - Dependency tracking treats functions and variables as if they were in one
-    namespace even though libqalculate treats them as separate, so don't give a
-    function and a variable the same name.
-- The buffer does not evaluate top-down like code; defined variables can
-  be referenced anywhere (akin to a 1D spreadsheet with named values).
+- The buffer does not evaluate top-down like code; defined variables can be
+  referenced anywhere (akin to a 1D spreadsheet with named values).
+- `ans` is not implemented. Use named variables instead.
+- A persistent RPN stack with manipulation commands is not possible due to the
+  evaluation order. RPN *syntax* is still supported (`:QalcSet parsing_mode rpn`).
+- There are some workarounds necessary to make dependency tracking tractable.
+  - Unknown-symbol parsing is always enabled.
+  - Implicit multiplication of symbols (`xy` = `x * y`) is always disabled.
+    Numeric implicit multiplication (`2x`) or implicit multiplication with a
+    space (`x y`) is still allowed though.
+  - Functions and variables are treated like they are in one namespace even though
+    libqalculate internally treats them as separate.
+
+## Unfixable issues
+
 - If you have multiple large qalc buffers, you may experience some lag when
-  switching between them. This is due to a technical limitation of
-  `libqalculate` that I unfortunately can't really do anything about.
-
-<details>
-  <summary>Technical details</summary>
-
-  For some reason, the `Calculator` struct in `libqalculate` is a stateful
-  singleton and instantiating more than one leads to a double free when their
-  destructors fire. My workaround in this plugin is to clear the state and
-  re-evaluate the entire buffer when you switch to it, and unfortunately I
-  don't think there's a better way.
-
-  I tried juggling multiple `Calculator` structs and swapping out the global
-  singleton pointer (which the destructor does some cleanup on, from what I
-  could gather), but it seems like the rest of the calculator state like loaded
-  definitions is global anyways and not encapsulated within the struct itself,
-  making multiple instances useless in the first place and making the double
-  free difficult to avoid.
-</details>
+  switching between them. This is due to a technical limitation within
+  `libqalculate` itself that I unfortunately can't really do anything about.
+  In this case, prefer using multiple nvim processes with one qalc buffer per
+  nvim to sidestep the issue.
 
 ## Configuration
 
@@ -125,17 +110,7 @@ To configure, call the `setup` function.
 
 ```lua
 require('qalc').setup({
-    -- these option groups are overrides, an empty group means use defaults that
-    -- match the default behavior of the `qalc` CLI as closely as possible
-	parse_options = {
-		angle_unit = 'radians',
-	},
-	print_options = {
-		base = 16,
-	},
-	evaluation_options = {
-		approximation = 'exact',
-	},
+    -- see configuration keys below
 })
 ```
 
@@ -156,13 +131,9 @@ require('qalc').setup({
       -- see `:h setreg()`
       yank_default_register = '@', -- string
 
-      -- libqalculate options, enum values accept names or integers
-      --> https://qalculate.github.io/reference/structParseOptions.html
-      parse_options = {},
-      --> https://qalculate.github.io/reference/structPrintOptions.html
-      print_options = {},
-      --> https://qalculate.github.io/reference/structEvaluationOptions.html
-      evaluation_options = {},
+      -- qalc CLI-style calculator options (same keys and values as :QalcSet)
+      -- e.g. { angle_unit = 'degrees' }
+      options = {},
 
       display = {
           -- sign shown before result (false to disable)

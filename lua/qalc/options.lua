@@ -1,122 +1,124 @@
+-- this is ai generated
 local M = {}
-local schemas = require('qalc.schema')
+local schema = require('qalc.schema')
 
-local scope_aliases = {
-	parse = 'parse_options',
-	print = 'print_options',
-	eval = 'evaluation_options',
-	evaluation = 'evaluation_options',
-}
-
-local function canonical_name(val)
-	return val:lower():gsub('[%s%-]+', '_')
-end
-
-local function invalid(path, val)
-	error(('qalc: invalid value for %s: %s'):format(path, vim.inspect(val)), 3)
-end
-
-local function bool_val(val)
-	if type(val) == 'boolean' then return val end
-	if type(val) == 'number' and (val == 0 or val == 1) then
-		return val == 1
+local aliases = {}
+for key, spec in pairs(schema) do
+	aliases[spec.name] = key
+	for _, alias in ipairs(spec.aliases) do
+		aliases[alias] = key
 	end
-	if type(val) == 'string' then
-		local name = canonical_name(val)
-		if name == 'on' or name == 'yes' or name == 'true' or name == '1' then
+end
+
+local function invalid(name, value)
+	error(('qalc: invalid value for %s: %s'):format(name, vim.inspect(value)), 3)
+end
+
+local function boolean(name, value)
+	if type(value) == 'boolean' then return value end
+	if value == 1 or value == 0 then return value == 1 end
+
+	if type(value) == 'string' then
+		local v = value:lower()
+
+		if v == 'on' or v == 'yes' or v == 'true' or v == '1' then
 			return true
 		end
-		if name == 'off' or name == 'no' or name == 'false' or name == '0' then
+
+		if v == 'off' or v == 'no' or v == 'false' or v == '0' then
 			return false
 		end
 	end
-	return nil
+
+	invalid(name, value)
 end
 
-local function normalize_bool(path, val)
-	local res = bool_val(val)
-	if res ~= nil then return res end
-	invalid(path, val)
-end
+local function normalize(key, value)
+	local spec = schema[key]
 
-local function normalize_int(path, spec, val)
-	if type(val) == 'string' then
-		local named = spec.values and spec.values[canonical_name(val)]
-		if named ~= nil then val = named else val = tonumber(val) end
+	if value == nil or value == '' then return nil end
+
+	if type(value) == 'string' and value:find('%s') then
+		invalid(spec.name, value)
 	end
 
-	if type(val) ~= 'number' or val % 1 ~= 0 then invalid(path, val) end
-	if spec.min and val < spec.min then invalid(path, val) end
-	if spec.max and val > spec.max then invalid(path, val) end
-
-	return val
-end
-
-local function normalize_val(path, spec, val)
 	if spec.type == 'boolean' then
-		val = normalize_bool(path, val)
-		return val
+		return boolean(spec.name, value)
+	end
 
-	elseif spec.type == 'integer' then
-		if spec.allow_boolean then
-			local normalized = bool_val(val)
-			if normalized ~= nil then return normalized and 1 or 0 end
+	local number
+	if type(value) == 'string' then
+		-- preserve E/e which have different meanings
+		number = spec.values[value] or spec.values[value:lower()]
+	end
+
+	if number ~= nil then return number end
+
+	number = tonumber(value)
+	if not number or number % 1 ~= 0 then
+		invalid(spec.name, value)
+	end
+
+	if spec.type == 'enum' then
+		if spec.numeric[number] == nil then
+			invalid(spec.name, value)
 		end
-		return normalize_int(path, spec, val)
 
-	elseif spec.type == 'enum' then
-		if spec.allow_boolean and type(val) == 'boolean' then
-			return val and 1 or 0
+		return spec.numeric[number]
+	end
+
+	if spec.type == 'base' then
+		if number < 2 or number > 36 then
+			invalid(spec.name, value)
 		end
-		return normalize_int(path, spec, val)
-
-	elseif spec.type == 'string' then
-		if type(val) ~= 'string' then invalid(path, val) end
-		return val
+	elseif (spec.min and number < spec.min) or (spec.max and number > spec.max)
+		or (key == 'binary_bits' and number == 1)
+	then
+		invalid(spec.name, value)
 	end
 
-	error('qalc: invalid option schema for ' .. path, 3)
+	return number
 end
 
--- sentinel value for resetting an option to default since nil values aren't
--- distinguishable from a missing kv pair in lua tables
-local RESET = {}
-
-local function is_reset(spec, val)
-	return val == nil or (val == '' and spec.type ~= 'string')
-end
-
-local function normalize_node(path, spec, val)
-	if is_reset(spec, val) then return RESET end
-
-	if spec.type ~= 'table' then
-		return normalize_val(path, spec, val)
+function M.change(current, name, value)
+	if type(name) ~= 'string' then
+		error('qalc: option name must be a string', 2)
 	end
 
-	if type(val) ~= 'table' then invalid(path, val) end
-
-	local normalized = {}
-
-	for k, v in pairs(val) do
-		local child = spec.fields[k]
-		local child_path = path .. '.' .. k
-
-		if not child then error('qalc: unknown option ' .. child_path, 3) end
-
-		normalized[k] = normalize_node(child_path, child, v)
+	local key = aliases[name:lower()]
+	if not key then
+		error('qalc: unknown option ' .. name, 2)
 	end
 
-	return normalized
-end
+	local result = vim.deepcopy(current)
+	local v = normalize(key, value)
 
-local function without_resets(val)
-	if val == RESET then return nil end
-	if type(val) ~= 'table' then return val end
+	if key == 'exact' then
+		key = 'approximation'
+		if v ~= nil then
+			v = v and 0 or 1
+		end
+	elseif key == 'round_to_even' then
+		key = 'rounding'
+		if v ~= nil then
+			v = v and 1 or 0
+		end
+	elseif key == 'lowercase_e' then
+		key = 'exp_display'
+		if v ~= nil then
+			v = v and 2 or 1
+		end
+	end
 
-	local result = {}
+	result[key] = v
 
-	for k, child in pairs(val) do
-		result[k] = without_resets(child)
+	if key == 'parsing_mode' then
+		result.rpn_syntax = nil
+	end
+
+	if key == 'ignore_comma' and v then
+		result.ignore_dot = false
+		result.decimal_comma = 0
 	end
 
 	return result
@@ -128,193 +130,204 @@ function M.normalize_cfg(cfg)
 	end
 
 	local normalized = vim.deepcopy(cfg or {})
-	local opt_groups = {}
+	local values = normalized.options
+	normalized.options = nil
 
-	for group, schema in pairs(schemas) do
-		local values = normalized[group]
-		normalized[group] = nil
+	if values == nil then return normalized end
+	if type(values) ~= 'table' then
+		error('qalc: options must be a table', 2)
+	end
 
-		if values ~= nil then
-			if type(values) ~= 'table' then
-				error('qalc: ' .. group .. ' must be a table', 2)
+	local result, assigned = {}, {}
+
+	-- stable setup ordering, reject conflicting aliases
+	for _, name in ipairs(vim.fn.sort(vim.tbl_keys(values))) do
+		local changed = M.change(result, name, values[name])
+
+		for key, value in pairs(changed) do
+			if not vim.deep_equal(value, result[key]) then
+				if assigned[key] then
+					error('qalc: conflicting option ' .. schema[key].name, 2)
+				end
+
+				assigned[key] = true
+			end
+		end
+
+		result = changed
+	end
+
+	return normalized, result
+end
+
+-- translate high-level opts to the native configuration job payload
+function M.snapshot(values)
+	local result = {}
+
+	for key, value in pairs(values) do
+		for _, native in ipairs(schema[key].keys) do
+			if native == 'evaluation.assume_denominators_nonzero' then
+				value = value and 1 or 0
 			end
 
-			local spec = { type = 'table', fields = schema }
-			opt_groups[group] = without_resets(normalize_node(group, spec, values))
+			result[native] = value
 		end
 	end
 
-	return normalized, opt_groups
-end
+	for _, kind in ipairs({ 'min', 'max' }) do
+		local v = values[kind .. '_decimals']
 
-local function resolve_path(path)
-	local parts = vim.split(path, '.', { plain = true })
-	local scope = table.remove(parts, 1)
-	local group = scope_aliases[scope] or scope
-	local fields = schemas[group]
+		if v ~= nil then
+			result['print.use_' .. kind .. '_decimals'] = v >= 0
 
-	if not fields or #parts == 0 then return end
-
-	local spec
-
-	for i, key in ipairs(parts) do
-		spec = fields[key]
-
-		if not spec then return end
-
-		if i < #parts then
-			if spec.type ~= 'table' then return end
-			fields = spec.fields
+			if v >= 0 or kind == 'min' then
+				result['print.' .. kind .. '_decimals'] = math.max(0, v)
+			end
 		end
 	end
 
-	return { group = group, keys = parts }, spec
-end
+	if values.unicode ~= nil or values.unicode_exponents ~= nil then
+		local exponents = values.unicode_exponents or 1
 
-local function collect_updates(updates, group, keys, val)
-	if val ~= RESET and type(val) == 'table' then
-		for key, child in pairs(val) do
-			local child_keys = vim.list_extend(vim.deepcopy(keys), { key })
-			collect_updates(updates, group, child_keys, child)
-		end
-
-		return
+		result['print.use_unicode_signs'] = values.unicode == false and 0
+			or ({ [0] = 3, 1, 2 })[exponents]
 	end
 
-	local upd = { group = group, keys = keys }
+	if values.approximation ~= nil then
+		local v = values.approximation
 
-	if val ~= RESET then upd.val = val end
-
-	updates[#updates+1] = upd
-end
-
-function M.normalize_cmd(path, val)
-	path = canonical_name(path)
-
-	local resolved, spec = resolve_path(path)
-
-	if not resolved then error('qalc: unknown option ' .. path, 2) end
-
-	local full_path = resolved.group .. '.' .. table.concat(resolved.keys, '.')
-	local normalized = normalize_node(full_path, spec, val)
-	local updates = {}
-
-	collect_updates(updates, resolved.group, resolved.keys, normalized)
-
-	return updates
-end
-
-local function collect_paths(paths, prefix, fields)
-	for key, spec in pairs(fields) do
-		local path = prefix .. '.' .. key
-
-		if spec.type == 'table' then
-			collect_paths(paths, path, spec.fields)
-		else
-			paths[#paths+1] = path
-		end
-	end
-end
-
-local cached_paths
-local cached_values = {}
-
-local function option_paths()
-	if not cached_paths then
-		cached_paths = {}
-
-		for group, schema in pairs(schemas) do
-			collect_paths(cached_paths, group:gsub('_options$', ''), schema)
-		end
-
-		table.sort(cached_paths)
+		result['evaluation.approximation'] = (v < 0 or v == 3) and 1 or v
+		result['output.auto_approximation'] = v < 0 and 2 or (v == 3 and 3 or 0)
 	end
 
-	return cached_paths
+	if values.fractions ~= nil then
+		local v = values.fractions
+
+		result['print.number_fraction_format'] = (v < 0 or v == 10) and 0 or (v == 9 and 2 or v)
+		result['print.restrict_fraction_length'] = v == 2 or v == 3
+		result['output.auto_fraction'] = v < 0 and 2 or (v == 10 and 3 or 0)
+	end
+
+	if values.algebra_mode ~= nil then
+		result['evaluation.structuring'] = values.algebra_mode
+		result['print.allow_factorization'] = values.algebra_mode == 2
+	end
+
+	if values.autoconversion ~= nil then
+		result['evaluation.auto_post_conversion'] = ({ [0] = 0, 3, 2, 1, 0 })[values.autoconversion]
+		result['evaluation.mixed_units_conversion'] = values.autoconversion == 0 and 0 or 3
+	end
+
+	if values.interval_display ~= nil then
+		-- The CLI's adaptive mode starts with significant-digit display.
+		result['print.interval_display'] = math.max(0, values.interval_display - 1)
+	end
+
+	if values.rpn_syntax then
+		result['parse.parsing_mode'] = 4
+	end
+
+	return result
+end
+
+function M.requires_reparse(before, after)
+	for _, values in ipairs({ before, after }) do
+		for key, _ in pairs(values) do
+			if key:match('^parse%.') or key:match('^state%.assumptions%.')
+				or key == 'state.decimal_comma' or key == 'state.concise_uncertainty'
+			then
+				if not vim.deep_equal(before[key], after[key]) then
+					return true
+				end
+			end
+		end
+	end
+
+	return false
+end
+
+local function names()
+	local result = {}
+
+	for _, spec in pairs(schema) do
+		result[#result+1] = spec.name
+
+		for _, alias in ipairs(spec.aliases) do
+			result[#result+1] = alias
+		end
+	end
+
+	table.sort(result)
+
+	return result
 end
 
 function M.option_paths()
-	return vim.deepcopy(option_paths())
+	return names()
 end
 
-local function option_values(spec)
-	if cached_values[spec] then return cached_values[spec] end
+local function candidates(spec)
+	local result = {}
 
-	local values = {}
-	local seen = {}
-
-	local function add(value)
-		value = tostring(value)
-
-		if not seen[value] then
-			seen[value] = true
-			values[#values+1] = value
-		end
+	for value in pairs(spec.values) do
+		result[#result+1] = value
 	end
 
-	for name in pairs(spec.values or {}) do add(name) end
-
-	if spec.type == 'enum' then
-		for value = spec.min, spec.max do add(value) end
-	elseif spec.type == 'boolean' or spec.allow_boolean then
-		for _, value in ipairs({ 'on', 'off', 'true', 'false', '0', '1' }) do
-			add(value)
-		end
+	for value in pairs(spec.numeric or {}) do
+		result[#result+1] = tostring(value)
 	end
 
-	table.sort(values)
-	cached_values[spec] = values
-
-	return values
-end
-
--- sorted candidates allow direct skip to first possible match
-local function prefix_matches(candidates, prefix)
-	local first, last = 1, #candidates + 1
-
-	while first < last do
-		local middle = math.floor((first + last) / 2)
-
-		if candidates[middle] < prefix then
-			first = middle + 1
-		else
-			last = middle
-		end
+	if spec.type == 'boolean' then
+		vim.list_extend(result, { 'on', 'off', 'true', 'false', '0', '1' })
 	end
 
-	local matches = {}
+	table.sort(result)
 
-	for i = first, #candidates do
-		local value = candidates[i]
-
-		if value:sub(1, #prefix) ~= prefix then break end
-
-		matches[#matches+1] = value
-	end
-
-	return matches
+	return result
 end
 
 function M.complete(arglead, cmdline, cursorpos)
-	local before_cursor = cmdline:sub(1, cursorpos)
-	local args = before_cursor:match('QalcSet%s+(.*)$')
-
+	local args = cmdline:sub(1, cursorpos):match('QalcSet%s+(.*)$')
 	if not args then return {} end
 
-	local path, value = args:match('^(%S+)%s+(.*)$')
+	local words = vim.split(args, '%s+')
+	local choices
 
-	if not path then
-		return prefix_matches(option_paths(), canonical_name(arglead))
+	if #words == 1 then
+		choices = names()
+		arglead = arglead:lower()
+	elseif #words == 2 and aliases[words[1]:lower()] then
+		choices = candidates(schema[aliases[words[1]:lower()]])
+	else
+		return {}
 	end
 
-	-- values with spaces may be entered manually but have no schema candidates
-	if value:find('%s') then return {} end
+	return vim.tbl_filter(function(value)
+		return value:sub(1, #arglead) == arglead
+	end, choices)
+end
 
-	local _, spec = resolve_path(canonical_name(path))
+function M.describe(values)
+	local result = {}
 
-	if not spec then return {} end
+	for key, value in pairs(values) do
+		local spec = schema[key]
 
-	return prefix_matches(option_values(spec), canonical_name(arglead))
+		if spec.type == 'boolean' then
+			value = value and 'on' or 'off'
+		else
+			for _, label in ipairs(candidates(spec)) do
+				if spec.values[label] == value then
+					value = label
+					break
+				end
+			end
+		end
+
+		result[spec.name] = value
+	end
+
+	return result
 end
 
 return M

@@ -1,367 +1,177 @@
--- ai generated
-local function enum(max, values, allow_boolean)
-	return {
-		type = 'enum',
-		values = values,
-		min = 0,
-		max = max,
-		allow_boolean = allow_boolean,
+-- this is ai generated i really did not want to write this myself
+local schema = {}
+
+local function option(name, kind, aliases, keys, values, numeric)
+	local spec = {
+		name = name,
+		type = kind,
+		aliases = aliases or {},
+		keys = keys or {},
+		values = values or {},
+		numeric = numeric,
 	}
+
+	schema[spec.name] = spec
+
+	return spec
 end
 
-local boolean = { type = 'boolean' }
-local integer = { type = 'integer' }
-local integer_boolean = { type = 'integer', allow_boolean = true }
-local unsigned = {
-	type = 'integer',
-	min = 0,
-	max = 4294967295,
-	values = { auto = 0 },
-}
-local string_value = { type = 'string' }
+local function boolean(name, aliases, key)
+	return option(name, 'boolean', aliases, { key })
+end
 
-local base_values = {
-	bin = 2,
-	binary = 2,
-	oct = 8,
-	octal = 8,
-	dec = 10,
-	decimal = 10,
-	duo = 12,
-	duodecimal = 12,
-	hex = 16,
-	hexadecimal = 16,
-	sexa = 60,
-	sexagesimal = 60,
-	sexagesimal2 = 62,
-	sexagesimal_2 = 62,
-	sexagesimal3 = 63,
-	sexagesimal_3 = 63,
-	latitude = 70,
-	latitude2 = 71,
-	latitude_2 = 71,
-	longitude = 72,
-	longitude2 = 73,
-	longitude_2 = 73,
-	time = -2,
-	roman = -1,
-	unicode = -4,
-	golden = -5,
-	golden_ratio = -5,
-	['φ'] = -5,
-	supergolden = -6,
-	supergolden_ratio = -6,
-	['ψ'] = -6,
-	pi = -7,
-	['π'] = -7,
-	e = -8,
-	sqrt2 = -9,
-	['sqrt(2)'] = -9,
-	bcd = -20,
-	bijective = -26,
-	b26 = -26,
-	fp16 = -30,
-	binary16 = -30,
-	fp32 = -31,
-	binary32 = -31,
-	float = -31,
-	fp64 = -32,
-	binary64 = -32,
-	double = -32,
-	fp128 = -33,
-	binary128 = -33,
-	fp80 = -34,
+local function enum(name, aliases, key, values, numeric)
+	return option(name, 'enum', aliases, { key }, values, numeric)
+end
+
+local bases = {
+	bin = 2, binary = 2, oct = 8, octal = 8, dec = 10, decimal = 10,
+	duo = 12, duodecimal = 12, hex = 16, hexadecimal = 16,
+	roman = -1, time = -2, unicode = -4, golden = -5, golden_ratio = -5,
+	['φ'] = -5, supergolden = -6, supergolden_ratio = -6, ['ψ'] = -6,
+	pi = -7, ['π'] = -7, e = -8, sqrt2 = -9, ['sqrt(2)'] = -9, ['√2'] = -9,
+	bcd = -20, bijective = -26, b26 = -26,
+	fp16 = -30, binary16 = -30, fp32 = -31, binary32 = -31, float = -31,
+	fp64 = -32, binary64 = -32, double = -32, fp128 = -33, binary128 = -33, fp80 = -34,
+	sexa = 60, sexagesimal = 60, sexa2 = 62, sexagesimal2 = 62, sexa3 = 63, sexagesimal3 = 63,
+	latitude = 70, latitude2 = 71, longitude = 72, longitude2 = 73,
 }
 
-local number_base = { type = 'integer', values = base_values }
+option('output_base', 'base', { 'base', 'outbase' }, { 'print.base' }, bases)
 
-local exponent_threshold = {
-	type = 'integer',
-	values = {
-		off = 0,
-		auto = -1,
-		engineering = -3,
-		pure = 1,
-		scientific = 3,
-	},
-}
+local input_bases = {}
+for k, v in pairs(bases) do
+	if v == -1 or v == -4 or (v >= -9 and v <= -5)
+		or v == -20 or v == -26 or (v >= 2 and v <= 36)
+	then
+		input_bases[k] = v
+	end
+end
 
-local enums = {
-	read_precision = enum(2, {
-		off = 0,
-		always = 1,
-		when_decimals = 2,
-	}),
-	angle_unit = enum(4, {
-		none = 0,
-		rad = 1,
-		radians = 1,
-		deg = 2,
-		degrees = 2,
-		gra = 3,
-		gradians = 3,
-		custom = 4,
-	}),
-	parsing_mode = enum(4, {
-		adaptive = 0,
-		implicit_first = 1,
-		implicit_multiplication_first = 1,
-		conventional = 2,
-		chain = 3,
-		rpn = 4,
-	}),
-	base_display = enum(3, {
-		none = 0,
-		normal = 1,
-		alternative = 2,
-		suffix = 3,
-	}),
-	number_fraction_format = enum(8, {
-		decimal = 0,
-		off = 0,
-		decimal_exact = 1,
-		exact = 1,
-		fractional = 2,
-		on = 2,
-		combined = 3,
-		mixed = 3,
-		fractional_fixed_denominator = 4,
-		combined_fixed_denominator = 5,
-		percent = 6,
-		permille = 7,
-		permyriad = 8,
-	}),
-	use_unicode_signs = enum(3, {
-		off = 0,
-		on = 1,
-		units = 2,
-		only_unit_exponents = 2,
-		without_exponents = 3,
-	}, true),
-	multiplication_sign = enum(3, {
-		asterisk = 0,
-		['*'] = 0,
-		dot = 1,
-		x = 2,
-		['×'] = 2,
-		altdot = 3,
-	}),
-	division_sign = enum(2, {
-		slash = 0,
-		['/'] = 0,
-		division_slash = 1,
-		['⁄'] = 1,
-		division = 2,
-		['÷'] = 2,
-	}),
-	interval_display = enum(7, {
-		significant = 0,
-		significant_digits = 0,
-		interval = 1,
-		plusminus = 2,
-		midpoint = 3,
-		lower = 4,
-		upper = 5,
-		concise = 6,
-		relative = 7,
-	}),
-	digit_grouping = enum(2, {
-		off = 0,
-		none = 0,
-		standard = 1,
-		on = 1,
-		locale = 2,
-	}),
-	date_time_format = enum(1, { iso = 0, locale = 1 }),
-	time_zone = enum(2, { utc = 0, ['local'] = 1, local_time = 1, custom = 2 }),
-	exp_display = enum(3, {
-		default = 0,
-		uppercase_e = 1,
-		lowercase_e = 2,
-		power_of_10 = 3,
-	}),
-	rounding = enum(10, {
-		half_away_from_zero = 0,
-		standard = 0,
-		half_to_even = 1,
-		even = 1,
-		half_to_odd = 2,
-		half_toward_zero = 3,
-		half_up = 4,
-		half_down = 5,
-		half_random = 6,
-		toward_zero = 7,
-		truncate = 7,
-		away_from_zero = 8,
-		up = 9,
-		down = 10,
-	}),
-	approximation = enum(2, {
-		exact = 0,
-		try_exact = 1,
-		auto = 1,
-		approximate = 2,
-	}),
-	auto_post_conversion = enum(3, {
-		none = 0,
-		best = 1,
-		si = 1,
-		optimal_si = 1,
-		optimalsi = 1,
-		base = 2,
-		optimal = 3,
-	}),
-	mixed_units_conversion = enum(5, {
-		none = 0,
-		downwards_keep = 1,
-		downwards = 2,
-		default = 3,
-		force_integer = 4,
-		force_all = 5,
-	}),
-	structuring = enum(2, {
-		none = 0,
-		expand = 1,
-		simplify = 1,
-		factorize = 2,
-	}),
-	complex_number_form = enum(3, {
-		rectangular = 0,
-		exponential = 1,
-		polar = 2,
-		cis = 3,
-	}),
-	interval_calculation = enum(3, {
-		none = 0,
-		variance = 1,
-		variance_formula = 1,
-		iv = 2,
-		interval_arithmetic = 2,
-		simple_interval_arithmetic = 3,
-	}),
-}
+option('input_base', 'base', { 'inbase' }, { 'parse.base' }, input_bases)
 
-local schemas = {
-	parse_options = {
-		variables_enabled = boolean,
-		functions_enabled = boolean,
-		units_enabled = boolean,
+enum('angle_unit', { 'angle' }, 'parse.angle_unit', {
+	none = 0, rad = 1, radians = 1, deg = 2, degrees = 2, gra = 3, gradians = 3,
+}, { [0] = 0, 1, 2, 3 })
+enum('parsing_mode', { 'parse', 'syntax' }, 'parse.parsing_mode', {
+	adaptive = 0, implicit_first = 1, conventional = 2, chain = 3, rpn = 4,
+}, { [0] = 0, 1, 2, 3, 4 })
+enum('read_precision', { 'readprec' }, 'parse.read_precision', {
+	off = 0, always = 1, when_decimals = 2, on = 2,
+}, { [0] = 0, 1, 2 })
+boolean('units', { 'unit' }, 'parse.units_enabled')
+boolean('variables', { 'var' }, 'parse.variables_enabled')
+boolean('functions', { 'func' }, 'parse.functions_enabled')
+boolean('ignore_dot', { 'nodot' }, 'parse.dot_as_separator')
+boolean('ignore_comma', { 'nocomma' }, 'parse.comma_as_separator')
+boolean('twos_complement_input', { 'twos_input', 'twosin' }, 'parse.twos_complement')
+boolean('hexadecimal_twos_input', { 'hextwosin' }, 'parse.hexadecimal_twos_complement')
+local bits = option('binary_bits', 'integer', { 'bits' }, { 'parse.binary_bits', 'print.binary_bits' })
+bits.min, bits.max, bits.values = 0, 4294967295, { auto = 0 }
 
-		dot_as_separator = boolean,
-		comma_as_separator = boolean,
-		brackets_as_parentheses = boolean,
-		preserve_format = boolean,
+boolean('abbreviations', { 'abbr', 'abbrev' }, 'print.abbreviate_names')
+boolean('all_prefixes', { 'allpref' }, 'print.use_all_prefixes')
+boolean('prefixes', { 'pref', 'prefix' }, 'print.use_unit_prefixes')
+boolean('denominator_prefixes', { 'denpref' }, 'print.use_denominator_prefix')
+boolean('place_units_separately', { 'unitsep' }, 'print.place_units_separately')
+boolean('excessive_parentheses', { 'expar' }, 'print.excessive_parenthesis')
+boolean('show_negative_exponents', { 'negexp' }, 'print.negative_exponents')
+boolean('minus_last', { 'minlast' }, 'print.sort_options.minus_last')
+boolean('short_multiplication', { 'shortmul' }, 'print.short_multiplication')
+boolean('lowercase_numbers', { 'lownum' }, 'print.lower_case_numbers')
+boolean('duodecimal_symbols', { 'duosyms' }, 'print.duodecimal_symbols')
+boolean('twos_complement', { 'twos' }, 'print.twos_complement')
+boolean('hexadecimal_twos', { 'hextwos' }, 'print.hexadecimal_twos_complement')
+boolean('spell_out_logical', { 'spellout' }, 'print.spell_out_logical_operators')
+boolean('spacious', { 'space' }, 'print.spacious')
+boolean('show_ending_zeroes', { 'zeroes' }, 'print.show_ending_zeroes')
+boolean('repeating_decimals', { 'repeating_decimal', 'repdeci' }, 'print.indicate_infinite_series')
+boolean('unicode', { 'uni' }, 'print.use_unicode_signs')
+enum('unicode_exponents', { 'uniexp' }, nil, { off = 0, on = 1, units = 2 }, { [0] = 0, 1, 2 })
+enum('base_display', { 'basedisp' }, 'print.base_display', {
+	none = 0, normal = 1, alternative = 2,
+}, { [0] = 0, 1, 2 })
+enum('digit_grouping', { 'group' }, 'print.digit_grouping', {
+	off = 0, none = 0, standard = 1, on = 1, locale = 2,
+}, { [0] = 0, 1, 2 })
+enum('multiplication_sign', { 'mulsign' }, 'print.multiplication_sign', {
+	['*'] = 0, ['.'] = 1, ['⋅'] = 1, x = 2, ['×'] = 2, ['·'] = 3,
+}, { [0] = 0, 1, 2, 3 })
+enum('division_sign', { 'divsign' }, 'print.division_sign', {
+	['/'] = 0, ['⁄'] = 1, ['÷'] = 2,
+}, { [0] = 0, 1, 2 })
+enum('rounding', { 'round' }, 'print.rounding', {
+	standard = 0, half_away_from_zero = 0, even = 1, round_to_even = 1,
+	half_to_even = 1, half_to_odd = 2, half_toward_zero = 3,
+	half_up = 4, half_down = 5, half_random = 6, truncate = 7,
+	toward_zero = 7, away_from_zero = 8, up = 9, down = 10,
+}, { [0] = 0, 1, 7, 2, 3, 4, 5, 6, 8, 9, 10 })
+local scientific = option('scientific_notation', 'integer', { 'exp', 'exp_mode' }, { 'print.min_exp' }, {
+	off = 0, auto = -1, pure = 1, scientific = 3, sci = 3, engineering = -3, eng = -3,
+})
+scientific.min, scientific.max = -2147483648, 2147483647
+enum('exp_display', { 'edisp' }, 'print.exp_display', {
+	E = 1, e = 2, ['10'] = 3, pow = 3, pow10 = 3, power = 3, power_of_10 = 3,
+}, { [0] = 1, 2, 3 })
+for _, name in ipairs({ 'min_decimals', 'max_decimals' }) do
+	local spec = option(name, 'integer', { name == 'min_decimals' and 'mindeci' or 'maxdeci' }, {}, { off = -1 })
+	spec.min, spec.max = -1, 2147483647
+end
+enum('fractions', { 'fr' }, nil, {
+	auto = -1, off = 0, exact = 1, on = 2, combined = 3, mixed = 3, long = 9, dual = 10,
+	percent = 6, ['%'] = 6, permille = 7, ['‰'] = 7, permyriad = 8, ['‱'] = 8,
+}, { [-1] = -1, [0] = 0, 1, 2, 3, 9, 10, 4, 5, 6, 7, 8 })
+enum('interval_display', { 'ivdisp' }, nil, {
+	adaptive = 0, significant = 1, interval = 2, plusminus = 3,
+	midpoint = 4, lower = 5, upper = 6, concise = 7, relative = 8,
+}, { [0] = 0, 1, 2, 3, 4, 5, 6, 7, 8 })
 
-		base = number_base,
-		binary_bits = unsigned,
-		twos_complement = boolean,
-		hexadecimal_twos_complement = boolean,
+enum('approximation', { 'appr', 'approx' }, nil, {
+	auto = -1, exact = 0, try_exact = 1, try = 1, approximate = 2, approx = 2, dual = 3,
+}, { [-1] = -1, [0] = 0, 1, 2, 3 })
+enum('algebra_mode', { 'alg' }, nil, {
+	none = 0, simplify = 1, expand = 1, factorize = 2, factor = 2,
+}, { [0] = 0, 1, 2 })
+enum('autoconversion', { 'conv' }, nil, {
+	none = 0, optimal = 1, base = 2, best = 3, optimalsi = 3, si = 3, mixed = 4,
+}, { [0] = 0, 1, 2, 3, 4 })
+enum('interval_calculation', { 'ic', 'uncertainty_propagation', 'up' }, 'evaluation.interval_calculation', {
+	none = 0, variance_formula = 1, variance = 1, interval_arithmetic = 2, iv = 2,
+}, { [0] = 0, 1, 2, 3 })
+enum('complex_form', { 'cplxform' }, 'evaluation.complex_number_form', {
+	rectangular = 0, cartesian = 0, rect = 0, exponential = 1, exp = 1, polar = 2, cis = 3,
+}, { [0] = 0, 1, 2, 3 })
+boolean('complex_numbers', { 'cplx' }, 'evaluation.allow_complex')
+boolean('infinite_numbers', { 'inf' }, 'evaluation.allow_infinite')
+boolean('assume_nonzero_denominators', { 'nzd' }, 'evaluation.assume_denominators_nonzero')
+boolean('warn_nonzero_denominators', { 'warnnzd' }, 'evaluation.warn_about_denominators_assumed_nonzero')
+boolean('calculate_variables', { 'calcvar' }, 'evaluation.calculate_variables')
+boolean('calculate_functions', { 'calcfunc' }, 'evaluation.calculate_functions')
+boolean('sync_units', { 'sync' }, 'evaluation.sync_units')
+boolean('currency_conversion', { 'curconv' }, 'evaluation.local_currency_conversion')
 
-		read_precision = enums.read_precision,
-		parsing_mode = enums.parsing_mode,
-		angle_unit = enums.angle_unit,
-	},
-
-	print_options = {
-		preserve_format = boolean,
-		allow_non_usable = boolean,
-		allow_factorization = boolean,
-
-		spacious = boolean,
-		excessive_parenthesis = boolean,
-		hide_underscore_spaces = boolean,
-		spell_out_logical_operators = boolean,
-		comma_sign = string_value,
-		decimalpoint_sign = string_value,
-		multiplication_sign = enums.multiplication_sign,
-		division_sign = enums.division_sign,
-		digit_grouping = enums.digit_grouping,
-		use_unicode_signs = enums.use_unicode_signs,
-
-		abbreviate_names = boolean,
-		use_reference_names = boolean,
-		place_units_separately = boolean,
-		use_unit_prefixes = boolean,
-		use_prefixes_for_all_units = boolean,
-		use_prefixes_for_currencies = boolean,
-		use_all_prefixes = boolean,
-		use_denominator_prefix = boolean,
-
-		negative_exponents = boolean,
-		halfexp_to_sqrt = boolean,
-		exp_to_root = boolean,
-		min_exp = exponent_threshold,
-		exp_display = enums.exp_display,
-
-		base = number_base,
-		binary_bits = unsigned,
-		twos_complement = boolean,
-		hexadecimal_twos_complement = boolean,
-		duodecimal_symbols = boolean,
-		lower_case_numbers = boolean,
-		base_display = enums.base_display,
-
-		indicate_infinite_series = boolean,
-		show_ending_zeroes = boolean,
-		preserve_precision = boolean,
-		interval_display = enums.interval_display,
-
-		min_decimals = integer,
-		max_decimals = integer,
-		use_min_decimals = boolean,
-		use_max_decimals = boolean,
-		restrict_to_parent_precision = boolean,
-		rounding = enums.rounding,
-
-		restrict_fraction_length = boolean,
-		number_fraction_format = enums.number_fraction_format,
-
-		short_multiplication = boolean,
-		improve_division_multipliers = boolean,
-
-		custom_time_zone = integer,
-		time_zone = enums.time_zone,
-		date_time_format = enums.date_time_format,
-
-		sort_options = {
-			type = 'table',
-			fields = {
-				prefix_currencies = boolean,
-				minus_last = boolean,
-			},
-		},
-	},
-
-	evaluation_options = {
-		calculate_variables = boolean,
-		calculate_functions = boolean,
-		test_comparisons = integer_boolean,
-		isolate_x = boolean,
-		assume_denominators_nonzero = integer_boolean,
-		warn_about_denominators_assumed_nonzero = boolean,
-		transform_trigonometric_functions = boolean,
-		approximation = enums.approximation,
-		interval_calculation = enums.interval_calculation,
-
-		keep_prefixes = boolean,
-		keep_zero_units = boolean,
-		sync_units = boolean,
-		sync_nonlinear_unit_relations = boolean,
-		local_currency_conversion = boolean,
-		auto_post_conversion = enums.auto_post_conversion,
-		mixed_units_conversion = enums.mixed_units_conversion,
-
-		expand = integer_boolean,
-		split_squares = boolean,
-		reduce_divisions = boolean,
-		combine_divisions = boolean,
-		do_polynomial_division = boolean,
-		structuring = enums.structuring,
-
-		allow_infinite = boolean,
-		allow_complex = boolean,
-		complex_number_form = enums.complex_number_form,
-	},
-}
-
-return schemas
+local precision = option('precision', 'integer', { 'prec' }, { 'state.precision' })
+precision.min, precision.max = 1, 2147483647
+enum('assumption_type', {}, 'state.assumptions.type', {
+	number = 2, num = 2, complex = 2, cplx = 2, real = 4, rational = 5, rat = 5,
+	integer = 6, int = 6, boolean = 7, bool = 7,
+}, { [2] = 2, [4] = 4, [5] = 5, [6] = 6, [7] = 7 })
+enum('assumption_sign', {}, 'state.assumptions.sign', {
+	unknown = 0, none = 0, positive = 1, pos = 1, non_negative = 2, nneg = 2,
+	negative = 3, neg = 3, non_positive = 4, npos = 4, non_zero = 5, nz = 5,
+}, { [0] = 0, 1, 2, 3, 4, 5 })
+boolean('interval_arithmetic', { 'ia', 'interval' }, 'state.interval_arithmetic')
+boolean('binary_prefixes', { 'binpref' }, 'state.binary_prefixes')
+boolean('variable_units', { 'varunits' }, 'state.variable_units')
+boolean('concise_uncertainty', { 'concise' }, 'state.concise_uncertainty')
+enum('temperature_calculation', { 'temp' }, 'state.temperature_calculation', {
+	hybrid = 0, absolute = 1, relative = 2,
+}, { [0] = 0, 1, 2 })
+enum('sinc', {}, 'state.sinc', { unnormalized = 0, normalized = 1 }, { [0] = 0, 1 })
+enum('decimal_comma', {}, 'state.decimal_comma', { locale = -1, off = 0, on = 1 }, { [-1] = -1, [0] = 0, 1 })
+-- These CLI shortcuts update their corresponding canonical controls.
+option('exact', 'boolean')
+option('round_to_even', 'boolean', { 'rndeven' })
+option('lowercase_e', 'boolean', { 'lowe' })
+option('rpn_syntax', 'boolean', { 'rpnsyn' })
+return schema
