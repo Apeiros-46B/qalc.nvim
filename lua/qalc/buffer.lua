@@ -351,6 +351,7 @@ end
 -- attach qalc to a buffer
 function M.attach(bufnr)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
+	if not vim.api.nvim_buf_is_valid(bufnr) then return end
 
 	if M.is_attached(bufnr) then
 		local state = M.attached_bufs[bufnr]
@@ -380,7 +381,10 @@ function M.attach(bufnr)
 			require('qalc.output').clear_all(detached_bufnr)
 		end,
 	})
-	vim.bo[bufnr].filetype = 'qalc'
+
+	if vim.bo[bufnr].filetype ~= 'qalc' then
+		vim.bo[bufnr].filetype = 'qalc'
+	end
 
 	if bufnr == vim.api.nvim_get_current_buf() then
 		cur_active_buf = bufnr

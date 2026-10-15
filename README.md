@@ -2,18 +2,25 @@
 
 *inspired by [quickmath.nvim](https://github.com/jbyuki/quickmath.nvim)*
 
-A Neovim plugin for reactive spreadsheet-like calculations with unit
-conversions, algebra, calculus, graph plotting, and more. Powered by
-[`libqalculate`](https://github.com/Qalculate/libqalculate).
+A Neovim plugin for reactive spreadsheet-like calculations.
+Powered by [`libqalculate`](https://github.com/Qalculate/libqalculate).
 
 ![screenshot](assets/screenshot.png)
 
 ## Features
 
-- All mathematical constructs supported by `libqalculate`
-- gnuplot integration (use `plot(f(x))`)
-- Syntax highlighting
-- Warnings and errors from expressions are shown as diagnostics
+- Calculation results are shown as virtual text and expressions automatically
+  re-evaluate when the value of their dependencies change
+- Warnings and errors from expressions are shown as nvim diagnostics
+- All mathematical features supported by `libqalculate`. Just to name a few:
+  - Unit conversion and scientific constants
+  - Algebra and symbolic manipulation
+  - Vectors and matrices
+  - Calculus
+  - Optional gnuplot integration (`plot(f(x))`)
+  - etc.
+- Custom syntax highlighting for builtin symbols and operators
+- Hover documentation for symbols (bound to `K` in qalc buffers)
 - [`nvim-cmp`](https://github.com/hrsh7th/nvim-cmp) integration for
   autocomplete and documentation of functions, constants, variables, and units
 
@@ -59,54 +66,18 @@ Edit a file with extension `.qalc` or use the `:Qalc` command to create a new
 calculator buffer. The `:Qalc` command optionally accepts one argument for the
 name of the newly created buffer.
 
+To turn an existing buffer into a calculator, set the filetype to `qalc`.
+
 You can yank the result on the current line with `:QalcYank`, which takes an
 optional register (see `:h setreg()`). The default register can be configured
 (see below).
 
 If the state of the calculation is somehow broken, you can use `:QalcReset` to
-force a rebuild of the dependency graph and re-evaluate every line. You can
-also attach calculation hooks to an existing buffer using `:QalcAttach`.
-
-Calculator options can be set using `:QalcSet` with the same option names as
-the `qalc` CLI, (but with spaces replaced by underscores and apostrophes
-removed). Named values also use underscores, such as `half_to_even`,
-`try_exact`, and `golden_ratio`. Tab completion includes option names, aliases,
-and accepted named values.
-
-Use `:QalcSet` without arguments to show current overrides. Omitting a value
-resets that option to its default. For boolean settings, use explicit
-`true`/`false` values.
-
-## Incompatibilities with the qalc CLI
-
-Due to the `qalc` CLI frontend being extremely complex and this plugin's heavier
-emphasis on reactive recalculation, 1:1 feature parity with it is not a goal.
-Some incompatible behaviors:
-
-- The buffer does not evaluate top-down like code; defined variables can be
-  referenced anywhere (akin to a 1D spreadsheet with named values).
-- `ans` is not implemented. Use named variables instead.
-- A persistent RPN stack with manipulation commands is not possible due to the
-  evaluation order. RPN *syntax* is still supported (`:QalcSet parsing_mode rpn`).
-- There are some workarounds necessary to make dependency tracking tractable.
-  - Unknown-symbol parsing is always enabled.
-  - Implicit multiplication of symbols (`xy` = `x * y`) is always disabled.
-    Numeric implicit multiplication (`2x`) or implicit multiplication with a
-    space (`x y`) is still allowed though.
-  - Functions and variables are treated like they are in one namespace even though
-    libqalculate internally treats them as separate.
-
-## Unfixable issues
-
-- If you have multiple large qalc buffers, you may experience some lag when
-  switching between them. This is due to a technical limitation within
-  `libqalculate` itself that I unfortunately can't really do anything about.
-  In this case, prefer using multiple nvim processes with one qalc buffer per
-  nvim to sidestep the issue.
+force a rebuild of the dependency graph and re-evaluate every line.
 
 ## Configuration
 
-To configure, call the `setup` function.
+To configure, call the `setup` function. This should only be called once.
 
 ```lua
 require('qalc').setup({
@@ -178,3 +149,48 @@ require('qalc').setup({
   }
   ```
 </details>
+
+## Runtime option setting
+
+Calculator options can be updated after `setup()` using `:QalcSet key value`
+with the same option keys and values as the `qalc` CLI, (but with spaces
+replaced by underscores and apostrophes removed). You can use tab completion to
+discover option keys and values. Omitting a value always resets that option to
+its default, so use explicit `true`/`false` values for boolean options.
+
+Runtime changes to options that affect output formatting will update calculated
+results, but built-in hover and completion docs are not affected at runtime.
+Configure the options through `setup()` before attaching the first calculator
+buffer to apply to those.
+
+Use `:QalcSet` without arguments to show which calculator options have been
+explicitly set (either through `setup()`'s `qalc_options` or `:QalcSet`).
+
+## Quirks
+
+### Incompatibilities with the qalc CLI
+
+Due to the `qalc` CLI frontend being extremely complex and this plugin's heavier
+emphasis on reactive recalculation, 1:1 feature parity with it is not a goal.
+Some incompatible behaviors:
+
+- The buffer does not evaluate top-down like code; defined variables can be
+  referenced anywhere (like a 1D spreadsheet with named values).
+- `ans` is not implemented, use named variables instead.
+- A persistent RPN stack with manipulation commands is not possible due to the
+  evaluation order. RPN *syntax* is still supported (`:QalcSet parsing_mode rpn`).
+- There are some workarounds necessary to make dependency tracking tractable:
+  - Unknown-symbol parsing is always enabled.
+  - Implicit multiplication of symbols (`xy` = `x * y`) is always disabled.
+    Numeric implicit multiplication (`2x`) or implicit multiplication with a
+    space (`x y`) is still allowed though.
+  - Functions and variables are treated like they are in one namespace even though
+    libqalculate internally treats them as separate.
+
+### Unfixable issues
+
+If you have multiple large qalc buffers, you may experience some lag when
+switching between them. This is due to a technical limitation within
+`libqalculate` itself that I unfortunately can't really do anything about.
+In this case, prefer using multiple nvim processes with one qalc buffer per
+nvim to sidestep the issue.

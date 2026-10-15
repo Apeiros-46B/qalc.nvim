@@ -13,7 +13,7 @@ end
 function M.attach_lines(lines)
 	vim.cmd.enew()
 	vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
-	vim.cmd.QalcAttach()
+	vim.cmd('setfiletype qalc')
 
 	local bufnr = vim.api.nvim_get_current_buf()
 	M.wait_for(function()

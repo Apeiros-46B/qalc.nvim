@@ -3,14 +3,9 @@ vim.api.nvim_create_user_command('Qalc',
 	function(cmd)
 		local buffer = require('qalc.buffer')
 		buffer.new_buf(cmd.args)
-		buffer.attach()
+		vim.bo.filetype = 'qalc'
 	end,
 	{ nargs = '?' }
-)
-
-vim.api.nvim_create_user_command('QalcAttach',
-	function(_) require('qalc.buffer').attach() end,
-	{ nargs = 0 }
 )
 
 vim.api.nvim_create_user_command('QalcReset',
@@ -50,11 +45,13 @@ vim.api.nvim_create_user_command('QalcSet',
 
 local augroup = vim.api.nvim_create_augroup('QalcBufferManagement', { clear = true })
 
-vim.api.nvim_create_autocmd({ 'BufReadPost', 'BufNewFile' }, {
+vim.api.nvim_create_autocmd('FileType', {
 	group = augroup,
-	pattern = { '*.qalc' },
+	pattern = 'qalc',
 	callback = function(args)
-		require('qalc.buffer').attach(args.buf)
+		vim.schedule(function()
+			require('qalc.buffer').attach(args.buf)
+		end)
 	end,
 })
 
