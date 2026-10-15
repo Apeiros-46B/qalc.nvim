@@ -439,6 +439,63 @@ static void parse_batch(
 	}
 }
 
+// vibecoded
+// remove colors and replace overline seq with combining overline unicode chars
+static void strip_terminal_styles(std::string& text) {
+	std::string stripped;
+	stripped.reserve(text.size());
+	bool overline = false;
+
+	for (size_t i = 0; i < text.size();) {
+		if (text[i] == '\033' && i + 1 < text.size() && text[i + 1] == '[') {
+			size_t end = text.find_first_not_of("0123456789;", i + 2);
+			if (end != std::string::npos && text[end] == 'm') {
+				unsigned int color_values = 0;
+				bool color_mode = false;
+
+				// color payloads must not be interpreted as SGR style codes
+				for (size_t pos = i + 2; pos <= end; ++pos) {
+					unsigned int parameter = 0;
+					while (pos < end && text[pos] != ';') {
+						if (parameter <= 255) {
+							parameter = parameter * 10 + (text[pos] - '0');
+						}
+						++pos;
+					}
+
+					if (color_values) {
+						--color_values;
+					} else if (color_mode) {
+						color_values = parameter == 2 ? 3 : parameter == 5 ? 1 : 0;
+						color_mode = false;
+					} else if (parameter == 38 || parameter == 48 || parameter == 58) {
+						color_mode = true;
+					} else if (parameter == 0 || parameter == 55) {
+						overline = false;
+					} else if (parameter == 53) {
+						overline = true;
+					}
+				}
+
+				i = end + 1;
+				continue;
+			}
+		}
+
+		char c = text[i++];
+		stripped.push_back(c);
+
+		// attach combining overline after complete UTF-8 character
+		if (overline && c != '\n' && c != '\r'
+			&& (i == text.size() || (static_cast<unsigned char>(text[i]) & 0xC0) != 0x80)
+		) {
+			stripped += u8"\u0305";
+		}
+	}
+
+	text.swap(stripped);
+}
+
 // worker thread
 // evaluate an expression
 static bool eval_line(
@@ -448,14 +505,30 @@ static bool eval_line(
 	const Options& opts
 ) {
 	auto started_at = std::chrono::steady_clock::now();
+
+	PrintOptions print_opts = opts.print;
+	print_opts.allow_non_usable = opts.multiline;
+
 	result.output = calc->calculateAndPrint(
 		input.expr,
 		EVAL_TIMEOUT_MS,
 		opts.eval,
-		opts.print,
+		print_opts,
 		opts.auto_fraction,
-		opts.auto_approximation
+		opts.auto_approximation,
+		nullptr,
+		-1,
+		nullptr,
+		opts.multiline,
+		0,
+		TAG_TYPE_TERMINAL
 	);
+
+	if (opts.multiline) {
+		// for some reason libqalculate adds sgr sequences when multiline
+		strip_terminal_styles(result.output);
+	}
+
 	auto elapsed = std::chrono::steady_clock::now() - started_at;
 
 	get_diags(calc, result.diags);

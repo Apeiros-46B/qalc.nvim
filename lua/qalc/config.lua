@@ -7,6 +7,7 @@ local M = {}
 -- default configuration
 M.cfg = {
 	-- default name of a newly opened buffer
+	-- set to '' to open an unnamed buffer
 	bufname = '', -- string
 
 	-- default register to yank results to
@@ -19,7 +20,7 @@ M.cfg = {
 
 	-- qalc CLI-style calculator options (same keys and values as :QalcSet)
 	-- e.g. { angle_unit = 'degrees' }
-	options = {},
+	qalc_options = {},
 
 	display = {
 		-- sign shown before result (false to disable)
@@ -28,18 +29,22 @@ M.cfg = {
 		-- placeholder shown while result is evaluating (false to disable)
 		placeholder = '...', -- string or false
 
-		-- whether or not to right align virtual text
-		right_align = false, -- boolean
+		-- whether to display multiline results as virtual lines or to collapse
+		-- all outputs to compact single-line virtual text
+		multiline = true, -- boolean
 
-		-- display style for multiline results
-		-- 'below': virtual lines below
-		-- 'collapse': make multiline results single-line
-		-- 'extend': virtual text at end of line + aligned virtual lines
-		multiline_style = 'below', -- boolean
+		-- number of spaces to indent multiline results, -1 means buffer's tabstop
+		multiline_indent = -1,
+
+		-- how to display the result sign for multiline results
+		-- 'eol': add sign at the end of calculation line like a single-line result
+		-- 'before': include sign in indentation, right-aligned before first line
+		-- 'none': don't display a sign for multiline results
+		multiline_sign_style = 'before',
 
 		-- highlight groups (see `:h nvim_set_hl()`)
 		highlights = { -- table
-			sign = { link = '@conceal' }, -- sign before result
+			sign = { link = 'Conceal' }, -- sign before result
 			result = { link = '@string' }, -- normal result
 		},
 
@@ -79,13 +84,10 @@ local function deep_extend_inplace(dest, src)
 	end
 end
 
-local function apply_options(values)
-	if values == nil or vim.deep_equal(M.cfg.options, values) then return end
+local function apply_options(before)
+	local after = M.options_snapshot()
+	if vim.deep_equal(before, after) then return end
 
-	local before = M.options_snapshot()
-	local after = options.snapshot(values)
-
-	M.cfg.options = values
 	M.opts_rev = M.opts_rev + 1
 
 	require('qalc.bridge').submit_config_update()
@@ -93,29 +95,48 @@ local function apply_options(values)
 end
 
 function M.setup(new_cfg)
-	local values
-	new_cfg, values = options.normalize_cfg(new_cfg)
+	new_cfg = vim.deepcopy(new_cfg or {})
+	local values = options.normalize(new_cfg.qalc_options)
+	new_cfg.qalc_options = nil
+
+	local before = M.options_snapshot()
 
 	deep_extend_inplace(M.cfg, new_cfg)
+	if values ~= nil then
+		M.cfg.qalc_options = values
+	end
+
 	rehighlight()
 
 	if M.cfg.display.diagnostics ~= false then
 		vim.diagnostic.config(M.cfg.display.diagnostics, util.ns)
 	end
 
-	apply_options(values)
+	apply_options(before)
+
+	for _, state in pairs(require('qalc.buffer').attached_bufs) do
+		require('qalc.output').refresh(state, true)
+	end
+	vim.cmd('redraw!')
 end
 
 function M.set_option(name, value)
-	apply_options(options.change(M.cfg.options, name, value))
+	local values = options.change(M.cfg.qalc_options, name, value)
+	local before = M.options_snapshot()
+
+	M.cfg.qalc_options = values
+	apply_options(before)
 end
 
 function M.options_snapshot()
-	return options.snapshot(M.cfg.options)
+	local snapshot = options.snapshot(M.cfg.qalc_options)
+	snapshot['output.multiline'] = M.cfg.display.multiline
+
+	return snapshot
 end
 
 function M.show_options()
-	vim.notify(vim.inspect(options.describe(M.cfg.options)), vim.log.levels.INFO, {
+	vim.notify(vim.inspect(options.describe(M.cfg.qalc_options)), vim.log.levels.INFO, {
 		title = 'qalc options (overrides)',
 	})
 end

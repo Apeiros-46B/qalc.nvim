@@ -17,6 +17,7 @@ struct Options {
 	EvaluationOptions eval;
 	AutomaticApproximation auto_approximation = AUTOMATIC_APPROXIMATION_OFF;
 	AutomaticFractionFormat auto_fraction = AUTOMATIC_FRACTION_OFF;
+	bool multiline = true;
 
 	// calculator-owned state with no corresponding option struct field.
 	// state.* keys in the lua table map to these

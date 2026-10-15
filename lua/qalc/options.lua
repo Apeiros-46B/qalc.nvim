@@ -124,19 +124,8 @@ function M.change(current, name, value)
 	return result
 end
 
-function M.normalize_cfg(cfg)
-	if cfg ~= nil and type(cfg) ~= 'table' then
-		error('qalc: config must be a table', 2)
-	end
-
-	local normalized = vim.deepcopy(cfg or {})
-	local values = normalized.options
-	normalized.options = nil
-
-	if values == nil then return normalized end
-	if type(values) ~= 'table' then
-		error('qalc: options must be a table', 2)
-	end
+function M.normalize(values)
+	if values == nil then return end
 
 	local result, assigned = {}, {}
 
@@ -157,7 +146,7 @@ function M.normalize_cfg(cfg)
 		result = changed
 	end
 
-	return normalized, result
+	return result
 end
 
 -- translate high-level opts to the native configuration job payload

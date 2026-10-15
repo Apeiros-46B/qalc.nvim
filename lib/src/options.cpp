@@ -80,8 +80,6 @@ static void read_print_opts(lua_State* L, int tbl, PrintOptions& o) {
 	lua::read(L, tbl, "print.sort_options.minus_last", o.sort_options.minus_last);
 
 	lua::read(L, tbl, "print.preserve_format", o.preserve_format);
-	lua::read(L, tbl, "print.allow_non_usable", o.allow_non_usable);
-
 	lua::read(L, tbl, "print.spacious", o.spacious);
 	lua::read(L, tbl, "print.excessive_parenthesis", o.excessive_parenthesis);
 	lua::read(L, tbl, "print.hide_underscore_spaces", o.hide_underscore_spaces);
@@ -189,6 +187,7 @@ void Options::read_lua(lua_State* L, int index) {
 	read_eval_opts(L, index, eval);
 	eval.parse_options = parse;
 
+	lua::read(L, index, "output.multiline", multiline);
 	lua::read_enum(L, index, "output.auto_approximation", 0, 3, auto_approximation);
 	lua::read_enum(L, index, "output.auto_fraction", 0, 3, auto_fraction);
 
