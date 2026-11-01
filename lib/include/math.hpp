@@ -1,0 +1,141 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+#include <libqalculate/MathStructure.h>
+#include <libqalculate/Prefix.h>
+#include <libqalculate/Unit.h>
+#include <libqalculate/Variable.h>
+#include <libqalculate/includes.h>
+
+#include "util.hpp"
+
+struct Definition {
+	LspKind type;
+	std::string ref_name;
+	std::string input_name;
+	std::string documentation; // fully formatted markdown string
+	std::vector<std::string> all_names;
+
+	Definition();
+	Definition(LspKind type, const std::string& ref_name);
+
+	static void to_lua(lua_State* L, const Definition& self);
+};
+
+void populate_def(
+	Calculator* calc,
+	Variable* var,
+	const PrintOptions& po,
+	Definition& def
+);
+void populate_def(
+	Calculator* calc,
+	Unit* unit,
+	const PrintOptions& po,
+	Definition& def
+);
+void populate_def(
+	Calculator* calc,
+	MathFunction* func,
+	const PrintOptions& po,
+	Definition& def
+);
+
+template<typename T>
+void get_all_names(T* expr, std::vector<std::string>& all_names) {
+	for (size_t i = 1; i <= expr->countNames(); ++i) {
+		all_names.push_back(expr->getName(i).name);
+	}
+}
+
+// make a definition from an expr and push it to a list of definitions
+template<typename T>
+void push_def(
+	Calculator* calc,
+	T* expr,
+	const PrintOptions& po,
+	std::vector<Definition>& defs
+) {
+	if (expr->isLocal() || !expr->isActive()) {
+		return;
+	}
+
+	Definition def;
+	def.ref_name = expr->referenceName();
+	def.input_name = expr->preferredInputName().name;
+
+	get_all_names(expr, def.all_names);
+
+	std::string disp_name = expr->preferredDisplayName(false, po.use_unicode_signs).name;
+	std::string disp_abbr = expr->preferredDisplayName(true, po.use_unicode_signs).name;
+	std::string title = expr->title(false, true);
+
+	def.documentation = "**" + disp_name + "**";
+	if (!disp_abbr.empty() && disp_abbr != disp_name) {
+		def.documentation += " (" + disp_abbr + ")";
+	}
+	if (!title.empty()) {
+		def.documentation += ": " + title;
+	}
+
+	populate_def(calc, expr, po, def);
+
+	std::string desc = expr->description();
+	if (!desc.empty()) {
+		def.documentation += "\n\n" + strings::preprocess_str(desc);
+	}
+
+	defs.push_back(std::move(def));
+}
+
+// isn't a populate_def overload because it's a special case
+void push_prefix_def(
+	Calculator* calc,
+	Prefix* prefix,
+	const PrintOptions& po,
+	std::vector<Definition>& defs
+);
+
+// check if a string is a single symbol
+bool is_valid_var_name(Calculator* calc, const std::string& s);
+bool is_valid_function_name(Calculator* calc, const std::string& s);
+
+// extract call names independently of the calculator's current function definitions
+void extract_fn_calls(
+	Calculator* calc,
+	const std::string& expression,
+	std::vector<std::string>& in_syms
+);
+
+// clean a symbol name, optionally removing backslashes and quotes
+std::string clean_symbol_name(std::string s, bool strip_escapes);
+
+// get the canonical name of the given symbol, variable, or unit.
+// returns false if the structure is not of those types
+bool get_canonical_name(const MathStructure& ast, std::string& out);
+
+// extract dependency information from a structure
+// definitions must be normalized to save() before extraction
+// * quoted symbols (e.g. 'x')
+// -> when used as a save() target, the value is saved to the UNQUOTED expression.
+//    'x' evaluates to 'x' but x now evaluates to the saved value. therefore, the
+//    unquoted symbol (x) should be tracked as an out sym
+// -> when on the RHS of an equality/..., it (quoted or not) should NOT be counted as a
+//    dependency because it evaluates to a symbol instead of the actual value
+// -> backslashed symbols (\x) seem to have the same behaviour EXCEPT in function defs,
+//    in which they serve as implicit positional args (\x = 1st arg, \y = 2nd, etc)
+void extract_syms(
+	Calculator* calc,
+	const MathStructure& ast,
+	std::vector<std::string>& in_syms,
+	std::vector<Definition>& out_syms,
+	const std::vector<std::string>& local_vars = {}
+);
+
+// debug: print the type of a structure
+const char* struct_type(StructureType type);
+
+// debug: print the AST of a structure
+std::string dump_ast(const MathStructure& ast);

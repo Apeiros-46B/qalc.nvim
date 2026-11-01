@@ -1,77 +1,107 @@
+# Migration from v1
+
+See [the migration guide](MIGRATION.md). Use the `legacy` branch if you can't migrate
+
 # qalc.nvim
 
 *inspired by [quickmath.nvim](https://github.com/jbyuki/quickmath.nvim)*
 
-A Neovim frontend for the [the `qalc` CLI program](https://github.com/Qalculate/libqalculate)
+A Neovim plugin for reactive spreadsheet-like calculations.
+Powered by [`libqalculate`](https://github.com/Qalculate/libqalculate).
+
+Disclaimer: This project is a bit of a spaghetti pile and there's a bit of
+barely reviewed LLM code (mostly options handling boilerplate) because
+libqalculate is not the most pleasant library to work with.
 
 ![screenshot](assets/screenshot.png)
 
 ## Features
 
-- Evaluates `qalc` commands in a Neovim buffer and updates results in virtual text on buffer content change
-- Shows warnings and errors from commands as Neovim diagnostics
+- Calculation results are shown as virtual text and expressions automatically
+  re-evaluate when the value of their dependencies change
+- Warnings and errors from expressions are shown as nvim diagnostics
+- All mathematical features supported by `libqalculate`. Just to name a few:
+  - Unit conversion and scientific constants
+  - Algebra and symbolic manipulation
+  - Vectors and matrices
+  - Calculus
+  - Optional gnuplot integration (`plot(f(x))`)
+  - etc.
+- Custom syntax highlighting for builtin symbols and operators
+- Hover documentation for symbols (bound to `K` in qalc buffers)
+- [`nvim-cmp`](https://github.com/hrsh7th/nvim-cmp) integration for
+  autocomplete and documentation of functions, constants, variables, and units
 
 ## Installation
 
-Requires the `qalc` binary executable and in `PATH`.
+Requires Neovim >=0.12, CMake >=3.10, libqalculate >=5.0.0, LuaJIT, and libuv.
+If you want to use the plotting feature, you also need gnuplot. The libuv headers
+and library used to build the plugin must be ABI-compatible with the version
+your Neovim was built with.
 
-Install using your preferred plugin manager:
+Install using your preferred plugin manager (example for [lazy.nvim](https://github.com/folke/lazy.nvim)):
 
-- [vim-plug](https://github.com/junegunn/vim-plug)
-```vim
-Plug "Apeiros-46B/qalc.nvim"
+```lua
+{
+    'Apeiros-46B/qalc.nvim',
+    opts = {},
+}
 ```
 
-- [packer.nvim](https://github.com/wbthomason/packer.nvim)
+You can lazy load if you want (with `ft = 'qalc', cmd = 'Qalc'`) but most of
+the plugin loading is already deferred.
+
+### cmp integration
+
+Add `{ name = 'qalc' }` to your cmp sources.
+
+### Nix build
+
+If you have [Nix](https://nixos.org/) available on your system, you can use it
+to build the C++ backend:
+
 ```lua
-use 'Apeiros-46B/qalc.nvim'
+{
+    'Apeiros-46B/qalc.nvim',
+    build = 'build_nix.lua',
+    opts = {},
+}
 ```
 
 ## Usage
 
-Edit a file with extension `.qalc` or use the `:Qalc` command.
-The `:Qalc` command optionally accepts one argument; the name of the newly created buffer.
+Edit a file with extension `.qalc` or use the `:Qalc` command to create a new
+calculator buffer. The `:Qalc` command optionally accepts one argument for the
+name of the newly created buffer. Use `:Qalc!` instead of `:Qalc` for a scratch
+buf.
 
-Alternatively, you can attach to an existing buffer using `:QalcAttach`.
+To turn an existing buffer into a calculator, set the filetype to `qalc`.
 
-You can yank the result on the current line with `:QalcYank`, which takes an optional register (see `:h setreg()`). The default register can be configured (see below).
+You can yank the result on the current line with `:QalcYank`, which takes an
+optional register (see `:h setreg()`). The default register can be configured
+(see below).
 
-All commands accepted in the buffer are `qalc` commands.
+If the state of the calculation is somehow broken, you can use `:QalcReset` to
+force a rebuild of the dependency graph and re-evaluate every line.
 
 ## Configuration
 
-To configure, call the `setup` function.
+To configure, call the `setup` function. This should only be called once.
 
 ```lua
 require('qalc').setup({
-    -- your config goes here
+    -- see configuration keys below
 })
 ```
-
-Keep in mind that this plugin is still under development so configuration keys may change or be removed at any time.
 
 <details>
   <summary>Default configuration</summary>
 
   ```lua
-  local config = {
-      -- extra command arguments for Qalculate
-      -- do NOT use the option `-t`/`--terse`; it will break the plugin
-      -- example: { '--set', 'angle deg' } to use degrees as the default angle unit
-      cmd_args = {}, -- table
-
+  M.cfg = {
       -- default name of a newly opened buffer
       -- set to '' to open an unnamed buffer
       bufname = '', -- string
-
-      -- the plugin will set all attached buffers to have this filetype
-      -- set to '' to disable setting the filetype
-      -- the default is provided for basic syntax highlighting
-      set_ft = 'config', -- string
-
-      -- file extension to automatically attach qalc to
-      -- set to '' to disable automatic attaching
-      attach_extension = '*.qalc', -- string
 
       -- default register to yank results to
       -- default register = '@'
@@ -81,48 +111,112 @@ Keep in mind that this plugin is still under development so configuration keys m
       -- see `:h setreg()`
       yank_default_register = '@', -- string
 
-      -- sign shown before result
-      sign = '=', -- string
+      -- qalc CLI-style calculator options (same keys and values as :QalcSet)
+      -- e.g. { angle_unit = 'degrees' }
+      qalc_options = {},
 
-      -- whether or not to show a sign before the result
-      show_sign = true, -- boolean
+      display = {
+          -- sign shown before result (false to disable)
+          sign = '=', -- string or false
 
-      -- whether or not to right align virtual text
-      right_align = false, -- boolean
+          -- placeholder shown while result is evaluating (false to disable)
+          placeholder = '...', -- string or false
 
-      -- highlight groups
-      highlights = {
-          sign     = '@conceal', -- sign before result
-          result   = '@string',  -- result in virtual text
+          -- whether to display multiline results as virtual lines or to collapse
+          -- all outputs to compact single-line virtual text
+          multiline = true, -- boolean
+
+          -- number of spaces to indent multiline results, -1 means buffer's tabstop
+          multiline_indent = -1,
+
+          -- how to display the result sign for multiline results
+          -- 'eol': add sign at the end of calculation line like a single-line result
+          -- 'before': include sign in indentation, right-aligned before first line
+          -- 'none': don't display a sign for multiline results
+          multiline_sign_style = 'before',
+
+          -- highlight groups (see `:h nvim_set_hl()`)
+          highlights = { -- table
+              sign = { link = 'Conceal' }, -- sign before result
+              result = { link = '@string' }, -- normal result
+          },
+
+          -- diagnostic options (false to respect the options in your Neovim config)
+          -- (see `:h vim.diagnostic.config()`)
+          diagnostics = { -- table or false
+              underline = true,
+              virtual_text = false,
+              signs = true,
+              update_in_insert = true,
+              severity_sort = true,
+          },
+
+          -- hover options
+          -- (see `:h vim.lsp.util.open_floating_preview.Opts`)
+          hover = {}
       },
-
-      -- diagnostic options
-      -- set to nil to respect the options in your neovim configuration
-      -- (see `:h vim.diagnostic.config()`)
-      diagnostics = { -- table?
-          underline = true,
-          virtual_text = false,
-          signs = true,
-          update_in_insert = true,
-          severity_sort = true,
-      },
-
-      -- use pty for job communication (MS Windows w/o WSL do not support pty)
-      use_pty = not ((vim.fn.has('win32') == 1) and (vim.fn.has('wsl') == 0)),
-
-      -- End-Of-File character (MS Windows uses ^Z (EOF), others use ^D (EOT))
-      eof = string.char(((vim.fn.has('win32') == 1) and (vim.fn.has('wsl') == 0)) and 26 or 4)
   }
   ```
 </details>
 
-## Planned Changes
+## Runtime option setting
 
-The following is a list of things I will most likely change/implement in the near future (when I have enough free time).  
-Items are ordered by priority.
+Calculator options can be updated after `setup()` using `:QalcSet key value`
+with the same option keys and values as the `qalc` CLI, (but with spaces
+replaced by underscores and apostrophes removed). You can use tab completion to
+discover option keys and values. Omitting a value always resets that option to
+its default, so use explicit `true`/`false` values for boolean options.
 
-- (fix) Preventing commands that output nothing or more than 1 line from breaking subsequent results display
-- (perf) Keeping the `qalc` process alive instead of calling it on every buffer update
-- (perf) Only recalculating what is necessary instead of recalculating the whole buffer on every update
-- (feat) Adding custom syntax highlighting (long-term)
-- (feat) Adding [nvim-cmp](https://github.com/hrsh7th/nvim-cmp) integration for completion of variables, functions, and units (long-term)
+Runtime changes to options that affect output formatting will update calculated
+results, but built-in hover and completion docs are not affected at runtime.
+Configure the options through `setup()` before attaching the first calculator
+buffer to apply to those.
+
+Use `:QalcSet` without arguments to show which calculator options have been
+explicitly set (either through `setup()`'s `qalc_options` or `:QalcSet`).
+
+## Unfinished
+
+(2026-10-31) The plugin works, but there are still a few niche `qalc` parity
+features (mostly options) that are missing. I'm a bit tired of working on this
+project for now but I will try to implement them if there is enough demand
+(feel free to open an issue, I will get around to it when I have some free
+time). The missing options:
+
+- setting display digits in significant digits rather than digits after decimal point
+- set default angle unit to something other than rad/deg/grad (e.g. arcsecond)
+- custom input/output bases beyond the existing list of supported bases
+- express results using a fixed fraction denominator
+- adaptive interval notation depending on the expression
+- setting a default currency that overrides locale
+- setting a default language that overrides locale
+- option to ignore startup locale
+
+## Quirks
+
+### Incompatibilities with the qalc CLI
+
+Due to the `qalc` CLI frontend being extremely complex and this plugin's heavier
+emphasis on reactive recalculation, 1:1 feature parity with it is not a goal.
+Some incompatible behaviors:
+
+- The buffer does not evaluate top-down like code; defined variables can be
+  referenced anywhere (like a 1D spreadsheet with named values).
+- `ans` is not implemented, use named variables instead.
+- A persistent RPN stack with manipulation commands is not possible due to the
+  evaluation order. RPN *syntax* is still supported (`:QalcSet parsing_mode rpn`).
+- There are some workarounds necessary to make dependency tracking tractable:
+  - Unknown-symbol parsing is always enabled.
+  - Implicit multiplication of symbols (`xy` = `x * y`) is always disabled.
+    Numeric implicit multiplication (`2x`) or implicit multiplication with a
+    space (`x y`) is still allowed though.
+  - Functions and variables are treated like they are in one namespace even though
+    libqalculate internally treats them as separate.
+
+### Unfixable issues
+
+If you have multiple large qalc buffers, you may experience some lag when
+switching between them. This is due to a technical limitation within
+`libqalculate` itself that I unfortunately can't really do anything about.
+In this case, prefer using multiple nvim processes with one qalc buffer per
+nvim to sidestep the issue.

@@ -1,34 +1,67 @@
--- initializes plugin
-local qalc = require('qalc')
-
--- {{{ create commands
--- Qalc
+-- commands
 vim.api.nvim_create_user_command('Qalc',
-    function(tbl)
-        -- create a new buffer and attach to it
-        qalc.new_buf(tbl.args, tbl.bang)
-        qalc.attach.current()
-    end,
-    -- 0 or 1 args
-    { nargs = '?', bang = true }
+	function(cmd)
+		local buffer = require('qalc.buffer')
+		buffer.new_buf(cmd.args, cmd.bang)
+		vim.bo.filetype = 'qalc'
+	end,
+	{ nargs = '?', bang = true }
 )
 
--- QalcAttach
-vim.api.nvim_create_user_command('QalcAttach', function(_) qalc.attach.current() end, { nargs = 0 })
+vim.api.nvim_create_user_command('QalcReset',
+	function(_) require('qalc.buffer').hard_reset() end,
+	{ nargs = 0 }
+)
 
--- QalcYank
 vim.api.nvim_create_user_command('QalcYank',
-    function(tbl)
-        qalc.yank.current(tbl.args or qalc.config.yank_default_register or '')
-    end,
-    { nargs = '?' }
+	function(cmd)
+		local register = cmd.args
+		if register == '' then
+			register = require('qalc.config').cfg.yank_default_register or ''
+		end
+		require('qalc.output').yank_result(register)
+	end,
+	{ nargs = '?' }
 )
--- }}}
 
--- automatically attach to files with extension set in config
-if qalc.config.attach_extension ~= '' then
-    vim.api.nvim_create_autocmd({ 'BufEnter', 'BufWinEnter', 'BufRead' }, {
-        pattern = { qalc.config.attach_extension },
-        command = 'QalcAttach',
-    })
-end
+vim.api.nvim_create_user_command('QalcSet',
+	function(cmd)
+		local config = require('qalc.config')
+		if #cmd.fargs == 0 then
+			config.show_options()
+			return
+		end
+		if #cmd.fargs > 2 then error('qalc: expected QalcSet [option [value]]') end
+		config.set_option(cmd.fargs[1], cmd.fargs[2])
+	end,
+
+	{
+		nargs = '*',
+		complete = function(arglead, cmdline, cursorpos)
+			return require('qalc.options').complete(arglead, cmdline, cursorpos)
+		end,
+	}
+)
+
+local augroup = vim.api.nvim_create_augroup('QalcBufferManagement', { clear = true })
+
+vim.api.nvim_create_autocmd('FileType', {
+	group = augroup,
+	pattern = 'qalc',
+	callback = function(args)
+		vim.schedule(function()
+			require('qalc.buffer').attach(args.buf)
+		end)
+	end,
+})
+
+-- sync state whenever focusing a buffer
+vim.api.nvim_create_autocmd('BufEnter', {
+	group = augroup,
+	pattern = '*',
+	callback = function(args)
+		vim.schedule(function()
+			require('qalc.buffer').focus_buffer(args.buf)
+		end)
+	end
+})

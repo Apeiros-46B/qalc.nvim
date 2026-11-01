@@ -1,14 +1,22 @@
--- vim.tbl_deep_extend returns a new table (new reference), this mutates the original table
-local function tbl_deep_extend(dest, src)
-    for k, v in pairs(src) do
-        if type(v) ~= 'table' then
-            dest[k] = v
-        else
-            tbl_deep_extend(dest[k], v)
-        end
-    end
-end
+local M = {}
 
-return {
-    tbl_deep_extend = tbl_deep_extend,
+M.ns = vim.api.nvim_create_namespace('qalc')
+
+M.JobType = {
+	PARSE_BATCH = 1,
+	EVAL_BATCH = 2,
+	GET_DEFS = 3,
+	UPDATE_CONFIG = 4,
 }
+
+M.LspKind = {
+	FUNC = vim.lsp.protocol.CompletionItemKind.Function,
+	VAR = vim.lsp.protocol.CompletionItemKind.Variable,
+	UNIT = vim.lsp.protocol.CompletionItemKind.Unit,
+	ENUM_MB = vim.lsp.protocol.CompletionItemKind.EnumMember,
+	CONST = vim.lsp.protocol.CompletionItemKind.Constant,
+}
+
+M.comment_pat = '#.*$'
+
+return M
