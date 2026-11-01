@@ -13,7 +13,8 @@ Disclaimer: This project is a bit of a spaghetti pile and there's a bit of
 barely reviewed LLM code (mostly options handling boilerplate) because
 libqalculate is not the most pleasant library to work with.
 
-![screenshot](assets/screenshot.png)
+![screenshot](assets/screenshot.webp)\
+*featured colorscheme is [elysium](https://github.com/Apeiros-46B/elysium)*
 
 ## Features
 
