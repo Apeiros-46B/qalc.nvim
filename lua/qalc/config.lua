@@ -84,6 +84,25 @@ local function deep_extend_inplace(dest, src)
 	end
 end
 
+local function warn_legacy_config(cfg)
+	local obsolete = {}
+	for _, key in ipairs({
+		'attach_extension', 'cmd_args', 'diagnostics', 'eof', 'highlights',
+		'right_align', 'set_ft', 'show_sign', 'sign', 'use_pty',
+	}) do
+		if cfg[key] ~= nil then obsolete[#obsolete+1] = key end
+	end
+	if #obsolete == 0 then return end
+
+	vim.notify(
+		'qalc.nvim: obsolete configuration keys: ' .. table.concat(obsolete, ', ')
+			.. '\nthese keys have no effect in the current plugin version. migration guide:'
+			.. '\nhttps://github.com/Apeiros-46B/qalc.nvim/tree/main/MIGRATION.md'
+			.. '\nto keep using the old version, pin branch = "legacy" in your plugin spec',
+		vim.log.levels.WARN
+	)
+end
+
 local function apply_options(changed, reparse)
 	if not changed then return end
 
@@ -95,6 +114,7 @@ end
 -- have delayed this rewrite for 4 years
 function M.setup(new_cfg)
 	new_cfg = vim.deepcopy(new_cfg or {})
+	warn_legacy_config(new_cfg)
 
 	local values = new_cfg.qalc_options
 	if values == nil then values = {} end

@@ -1,3 +1,7 @@
+# Migration from v1
+
+See [the migration guide](MIGRATION.md). Use the `legacy` branch if you can't migrate
+
 # qalc.nvim
 
 *inspired by [quickmath.nvim](https://github.com/jbyuki/quickmath.nvim)*
