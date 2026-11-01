@@ -1,5 +1,8 @@
+local source = debug.getinfo(1, 'S').source:sub(2)
+local root = vim.fs.dirname(vim.fn.fnamemodify(source, ':p'))
+
 local function run(cmd)
-	local result = vim.system(cmd):wait()
+	local result = vim.system(cmd, { cwd = root }):wait()
 	if result.code ~= 0 then
 		error(result.stderr or result.stdout or 'build command failed')
 	end
@@ -18,7 +21,7 @@ run({ 'cmake', '--build', './lib/build' })
 local exts = { 'dll', 'dylib', 'so' }
 for _, ext in ipairs(exts) do
 	local src = '../../lib/build/libqalcbridge.' .. ext
-	local dst = './lua/qalc/lib.' .. ext
+	local dst = root .. '/lua/qalc/lib.' .. ext
 
 	vim.uv.fs_unlink(dst)
 	vim.uv.fs_symlink(src, dst)
