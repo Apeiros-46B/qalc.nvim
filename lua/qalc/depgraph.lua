@@ -1,3 +1,4 @@
+-- determine which statements to recalculate
 local Graph = {}
 Graph.__index = Graph
 

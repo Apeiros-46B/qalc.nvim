@@ -17,6 +17,7 @@ add_library(${PROJECT_NAME} SHARED
 	src/lib.cpp
 	src/math.cpp
 	src/options.cpp
+	src/option_schema.cpp
 	src/util.cpp
 	src/worker.cpp
 )

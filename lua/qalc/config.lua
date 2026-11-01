@@ -84,35 +84,36 @@ local function deep_extend_inplace(dest, src)
 	end
 end
 
-local function apply_options(before)
-	local after = M.options_snapshot()
-	if vim.deep_equal(before, after) then return end
+local function apply_options(changed, reparse)
+	if not changed then return end
 
 	M.opts_rev = M.opts_rev + 1
-
-	require('qalc.bridge').submit_config_update()
-	require('qalc.buffer').options_changed(options.requires_reparse(before, after))
+	require('qalc.buffer').options_changed(reparse)
 end
 
+-- full of hacks but idk how to make this better idk im tired i maybe shouldnt
+-- have delayed this rewrite for 4 years
 function M.setup(new_cfg)
 	new_cfg = vim.deepcopy(new_cfg or {})
-	local values = options.normalize(new_cfg.qalc_options)
+
+	local values = new_cfg.qalc_options
+	if values == nil then values = {} end
+
+	local changed, reparse = options.set(values)
+	if new_cfg.qalc_options ~= nil then M.cfg.qalc_options = values end
 	new_cfg.qalc_options = nil
 
-	local before = M.options_snapshot()
+	local multiline = new_cfg.display and new_cfg.display.multiline
+	changed = changed or (multiline ~= nil and multiline ~= M.cfg.display.multiline)
 
 	deep_extend_inplace(M.cfg, new_cfg)
-	if values ~= nil then
-		M.cfg.qalc_options = values
-	end
-
 	rehighlight()
 
 	if M.cfg.display.diagnostics ~= false then
 		vim.diagnostic.config(M.cfg.display.diagnostics, util.ns)
 	end
 
-	apply_options(before)
+	apply_options(changed, reparse)
 
 	for _, state in pairs(require('qalc.buffer').attached_bufs) do
 		require('qalc.output').refresh(state, true)
@@ -120,24 +121,26 @@ function M.setup(new_cfg)
 	vim.cmd('redraw!')
 end
 
-function M.set_option(name, value)
-	local values = options.change(M.cfg.qalc_options, name, value)
-	local before = M.options_snapshot()
-
-	M.cfg.qalc_options = values
-	apply_options(before)
+function M.set_options(values)
+	apply_options(options.set(values))
 end
 
-function M.options_snapshot()
-	local snapshot = options.snapshot(M.cfg.qalc_options)
-	snapshot['output.multiline'] = M.cfg.display.multiline
+function M.reset_options(names)
+	apply_options(options.reset(names))
+end
 
-	return snapshot
+function M.set_option(name, value)
+	assert(type(name) == 'string', 'qalc: option name must be a string')
+	if value == nil then
+		M.reset_options({ name })
+	else
+		M.set_options({ [name] = value })
+	end
 end
 
 function M.show_options()
-	vim.notify(vim.inspect(options.describe(M.cfg.qalc_options)), vim.log.levels.INFO, {
-		title = 'qalc options (overrides)',
+	vim.notify(vim.inspect(options.describe()), vim.log.levels.INFO, {
+		title = 'currently set qalc option overrides',
 	})
 end
 

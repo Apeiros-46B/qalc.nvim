@@ -21,6 +21,8 @@ extern "C" {
 
 namespace worker {
 
+static constexpr char MT[] = "libqalcbridge.Worker";
+
 static Worker* worker = nullptr;
 
 constexpr int EVAL_TIMEOUT_MS = 2000;
@@ -68,7 +70,7 @@ void EvalBatchResult::to_lua(lua_State* L, EvalBatchResult& self) {
 // }}}
 
 // {{{ other lua plumbing
-void init_mt(lua_State* L) {
+static void init_mt(lua_State* L) {
 	luaL_newmetatable(L, MT);
 
 	// create a destructor for the worker thread
@@ -88,8 +90,9 @@ void init_mt(lua_State* L) {
 	lua_pop(L, 1);
 }
 
-// initialises the given callback in the registry and spawns the worker
 void init(lua_State* L) {
+	init_mt(L);
+
 	Worker** ptr = lua::Userdata<Worker*>::push(L, MT);
 	*ptr = new Worker(L);
 	lua_setfield(L, LUA_REGISTRYINDEX, MT); // use mt name as identifier
@@ -100,8 +103,8 @@ void init(lua_State* L) {
 }
 
 // get a reference to nvim's loop. we need to do this since uv_default_loop() does NOT
-// return the same loop as the one that nvim uses. we pass a uv handle from lua, and then
-// extract the inner loop reference
+// return the same loop as the one that nvim uses. we pass a uv handle from lua, and
+// then extract the inner loop reference
 // MUST be done from lua side before submitting any jobs:
 //   local dummy = vim.uv.new_timer()
 //   lib.init_loop(dummy)
@@ -118,16 +121,33 @@ int lua_init_loop(lua_State* L) {
 // }}}
 
 // {{{ lua-exposed functions
-// lib.update_config(overrides)
-int lua_update_config(lua_State* L) {
-	if (worker != nullptr) {
-		Job job;
-		job.type = JobType::UPDATE_CONFIG;
-		job.opts.reset(new Options());
-		job.opts->read_lua(L, 1);
-		worker->submit_job(std::move(job));
+static int update_config(lua_State* L, bool reset) {
+	const int args = lua_gettop(L);
+
+	try {
+		options::ConfigUpdate upd = options::read_option_update(L, 1, reset);
+
+		if (!upd.changes.empty()) {
+			Job job;
+			job.type = JobType::UPDATE_CONFIG;
+			job.config = std::move(upd);
+			worker->submit_job(std::move(job));
+		}
+
+		return lua_gettop(L) - args;
+	} catch (const std::exception& error) {
+		lua_pushstring(L, error.what());
 	}
-	return 0;
+
+	return lua_error(L);
+}
+
+int lua_set_options(lua_State* L) {
+	return update_config(L, false);
+}
+
+int lua_reset_options(lua_State* L) {
+	return update_config(L, true);
 }
 
 int lua_get_defs(lua_State* L) {
@@ -139,7 +159,15 @@ int lua_get_defs(lua_State* L) {
 	return 0;
 }
 
-// lib.submit_eval_batch(bufnr, doc_id, generation, reset, deletions, inputs)
+// lib.submit_eval_batch(
+// 	bufnr,
+// 	doc_id,
+// 	generation,
+// 	reset,
+// 	deletions,
+// 	inputs,
+// 	multiline,
+// )
 int lua_submit_eval_batch(lua_State* L) {
 	// TODO: cleanup, this is very messy
 	Job job;
@@ -148,6 +176,7 @@ int lua_submit_eval_batch(lua_State* L) {
 	job.eval_batch.doc_id = static_cast<std::uint64_t>(luaL_checknumber(L, 2));
 	job.eval_batch.generation = static_cast<std::uint64_t>(luaL_checknumber(L, 3));
 	job.eval_batch.reset = lua::pop<bool>(L, 4);
+	job.eval_batch.multiline = lua::pop_or<bool>(L, 7, true);
 
 	luaL_checktype(L, 5, LUA_TTABLE);
 	std::size_t deletion_count = lua_objlen(L, 5);
@@ -261,6 +290,7 @@ Worker::Worker(lua_State* L): L{L} {
 	calc->loadGlobalDefinitions();
 
 	opts.set_startup_locale(calc);
+	opts.apply_state_opts_to(calc);
 
 	// SECURITY: remove "command" function
 	// risk of RCE since it allows qalc files to execute arbitrary shell commands
@@ -272,7 +302,7 @@ Worker::Worker(lua_State* L): L{L} {
 	}
 
 	// async remains uninitialized!
-	// these MUST be called before submitting any jobs:
+	// these MUST be called before submitting jobs that produce results:
 	// - init_async
 	// - set_callback
 
@@ -502,12 +532,13 @@ static bool eval_line(
 	Calculator* calc,
 	const EvalInput& input,
 	EvalResult& result,
-	const Options& opts
+	const options::Options& opts,
+	bool multiline
 ) {
 	auto started_at = std::chrono::steady_clock::now();
 
 	PrintOptions print_opts = opts.print;
-	print_opts.allow_non_usable = opts.multiline;
+	print_opts.allow_non_usable = multiline;
 
 	result.output = calc->calculateAndPrint(
 		input.expr,
@@ -519,12 +550,12 @@ static bool eval_line(
 		nullptr,
 		-1,
 		nullptr,
-		opts.multiline,
+		multiline,
 		0,
 		TAG_TYPE_TERMINAL
 	);
 
-	if (opts.multiline) {
+	if (multiline) {
 		// for some reason libqalculate adds sgr sequences when multiline
 		strip_terminal_styles(result.output);
 	}
@@ -565,7 +596,7 @@ static void eval_batch(
 	Calculator* calc,
 	Job& job,
 	JobResult& job_result,
-	const Options& opts
+	const options::Options& opts
 ) {
 	// TODO: very defensive err handling code can probably be cleaned up somehow
 	const EvalBatch& batch = job.eval_batch;
@@ -615,7 +646,7 @@ static void eval_batch(
 		}
 
 		try {
-			if (eval_line(calc, input, evaluated, opts)) {
+			if (eval_line(calc, input, evaluated, opts, batch.multiline)) {
 				evaluated.diags.push_back({Severity::ERROR, TIMEOUT_MSG});
 				evaluated.output.clear();
 
@@ -710,9 +741,8 @@ void Worker::main_loop() {
 					break;
 				}
 				case JobType::UPDATE_CONFIG: {
-					opts.take_from(std::move(*job.opts));
-					opts.apply_state(calc);
-					continue;
+					job.config.apply(opts, calc);
+					break;
 				}
 			}
 		} catch (const std::exception& e) {
@@ -748,6 +778,9 @@ void Worker::main_loop() {
 				}
 			}
 		}
+
+		// no result from config updates
+		if (job.type == JobType::UPDATE_CONFIG) continue;
 
 		// push results and notify main thread
 		{

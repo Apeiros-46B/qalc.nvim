@@ -69,13 +69,9 @@ function M.submit_eval_batch(
 		generation,
 		reset,
 		deletions,
-		inputs
+		inputs,
+		require('qalc.config').cfg.display.multiline
 	)
-end
-
-function M.submit_config_update()
-	if not callback_registered then return end
-	require('qalc.lib').update_config(require('qalc.config').options_snapshot())
 end
 
 local function handle_get_defs(attached_bufs, defs)
@@ -213,7 +209,6 @@ function M.register_callback(attached_bufs, on_parse_batch, on_eval_batch)
 	dummy:close()
 
 	lib.set_callback(vim.schedule_wrap(handle_job))
-	M.submit_config_update()
 	lib.get_defs()
 end
 

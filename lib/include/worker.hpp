@@ -3,7 +3,6 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
-#include <memory>
 #include <mutex>
 #include <queue>
 #include <string>
@@ -23,13 +22,12 @@ extern "C" {
 
 namespace worker {
 
-static const char* MT = "libqalcbridge.Worker";
-void init_mt(lua_State* L);
 void init(lua_State* L);
 
 // called from lua
 int lua_init_loop(lua_State* L);
-int lua_update_config(lua_State* L);
+int lua_set_options(lua_State* L);
+int lua_reset_options(lua_State* L);
 int lua_get_defs(lua_State* L);
 int lua_submit_eval_batch(lua_State* L);
 int lua_submit_parse_batch(lua_State* L);
@@ -83,6 +81,7 @@ struct EvalBatch {
 	std::uint64_t doc_id = 0;
 	std::uint64_t generation = 0;
 	bool reset = false;
+	bool multiline = true;
 	std::vector<std::string> deletions;
 	std::vector<EvalInput> inputs;
 };
@@ -106,7 +105,7 @@ struct Job {
 	EvalBatch eval_batch;
 
 	// only UPDATE_CONFIG jobs have this
-	std::unique_ptr<Options> opts;
+	options::ConfigUpdate config;
 };
 
 struct JobResult {
@@ -147,7 +146,7 @@ private:
 
 	// this is the only calculator instance we can use
 	Calculator* calc = nullptr;
-	Options opts;
+	options::Options opts;
 
 	void main_loop();
 	void process_results();

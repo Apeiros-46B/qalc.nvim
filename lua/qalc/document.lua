@@ -1,4 +1,4 @@
--- handle buffer creation, attach, cleanup, and job submission
+-- track statements in a document
 local M = {}
 M.__index = M
 
