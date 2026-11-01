@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include <libqalculate/BuiltinFunctions.h>
+
 #include "options.hpp"
 #include "options_schema.hpp"
 #include "util.hpp"
@@ -21,9 +23,10 @@ constexpr long long INTERNAL_APPROX_DUAL = -2;
 constexpr long long INTERNAL_FRACTION_AUTO = -1;
 constexpr long long INTERNAL_FRACTION_LONG = -2;
 constexpr long long INTERNAL_FRACTION_DUAL = -3;
+constexpr long long INTERNAL_COMPLEX_ANGLE = -1;
 
-Binding::Binding(Setter set, Resetter reset, bool state)
-	: set(std::move(set)), reset(std::move(reset)), state(state)
+Binding::Binding(Setter set, Resetter reset)
+	: set(std::move(set)), reset(std::move(reset))
 {}
 
 // {{{ create bindings
@@ -33,26 +36,38 @@ static const Options& defaults() {
 }
 
 template<typename T>
-static Binding field(T Options::* member, bool state = true) {
+static Binding field(T Options::* member) {
 	return {
-		[member](Options& options, long long value) {
+		[member](Options& options, Calculator*, long long value) {
 			options.*member = static_cast<T>(value);
 		},
-		[member](Options& options) { options.*member = defaults().*member; },
-		state,
+		[member](Options& options, Calculator*) {
+			options.*member = defaults().*member;
+		},
 	};
 }
 
 template<typename Group, typename T>
-static Binding field(Group Options::* group, T Group::* member, bool state = false) {
+static Binding field(Group Options::* group, T Group::* member) {
 	return {
-		[group, member](Options& options, long long value) {
+		[group, member](Options& options, Calculator*, long long value) {
 			(options.*group).*member = static_cast<T>(value);
 		},
-		[group, member](Options& options) {
+		[group, member](Options& options, Calculator*) {
 			(options.*group).*member = (defaults().*group).*member;
 		},
-		state,
+	};
+}
+
+template<typename Set>
+static Binding calculator(Set set, long long initial) {
+	return {
+		[set](Options&, Calculator* calc, long long value) {
+			set(calc, value);
+		},
+		[set, initial](Options&, Calculator* calc) {
+			set(calc, initial);
+		},
 	};
 }
 // }}}
@@ -149,11 +164,11 @@ static std::vector<Option> build_schema() {
 		field(&Options::print, &PrintOptions::abbreviate_names));
 
 	add("algebra_mode", Kind::ENUM, { "alg" },
-		Binding{ [](Options& o, long long v) {
+		Binding{ [](Options& o, Calculator*, long long v) {
 			o.eval.structuring = static_cast<StructuringMode>(v);
 			o.print.allow_factorization = v == STRUCTURING_FACTORIZE;
 		},
-		[](Options& o) {
+		[](Options& o, Calculator*) {
 			o.eval.structuring = defaults().eval.structuring;
 			o.print.allow_factorization = defaults().print.allow_factorization;
 		} },
@@ -177,7 +192,7 @@ static std::vector<Option> build_schema() {
 		true);
 
 	add("approximation", Kind::ENUM, { "appr", "approx" },
-		Binding{ [](Options& o, long long v) {
+		Binding{ [](Options& o, Calculator*, long long v) {
 			o.eval.approximation = (v == INTERNAL_APPROX_AUTO
 				|| v == INTERNAL_APPROX_DUAL)
 				? APPROXIMATION_TRY_EXACT : static_cast<ApproximationMode>(v);
@@ -188,7 +203,7 @@ static std::vector<Option> build_schema() {
 				o.auto_approximation = AUTOMATIC_APPROXIMATION_DUAL;
 			}
 		},
-		[](Options& o) {
+		[](Options& o, Calculator*) {
 			o.eval.approximation = defaults().eval.approximation;
 			o.auto_approximation = defaults().auto_approximation;
 		} },
@@ -204,7 +219,9 @@ static std::vector<Option> build_schema() {
 		field(&Options::eval, &EvaluationOptions::assume_denominators_nonzero));
 
 	add("assumption_sign", Kind::ENUM, {},
-		field(&Options::assumption_sign),
+		calculator([](Calculator* calc, long long v) {
+			calc->defaultAssumptions()->setSign(static_cast<AssumptionSign>(v));
+		}, ASSUMPTION_SIGN_UNKNOWN),
 		{
 			{ 0, ASSUMPTION_SIGN_UNKNOWN, { "none", "unknown" } },
 			{ 1, ASSUMPTION_SIGN_POSITIVE, { "pos", "positive" } },
@@ -216,7 +233,9 @@ static std::vector<Option> build_schema() {
 		true);
 
 	add("assumption_type", Kind::ENUM, {},
-		field(&Options::assumption_type),
+		calculator([](Calculator* calc, long long v) {
+			calc->defaultAssumptions()->setType(static_cast<AssumptionType>(v));
+		}, ASSUMPTION_TYPE_REAL),
 		{
 			{ 2, ASSUMPTION_TYPE_NUMBER, { "complex", "cplx", "num", "number" } },
 			{ 4, ASSUMPTION_TYPE_REAL, { "real" } },
@@ -227,7 +246,7 @@ static std::vector<Option> build_schema() {
 		true);
 
 	add("autoconversion", Kind::ENUM, { "conv" },
-		Binding{ [](Options& o, long long v) {
+		Binding{ [](Options& o, Calculator*, long long v) {
 			const AutoPostConversion conversion[] = {
 				POST_CONVERSION_NONE, POST_CONVERSION_OPTIMAL,
 				POST_CONVERSION_BASE, POST_CONVERSION_OPTIMAL_SI,
@@ -237,7 +256,7 @@ static std::vector<Option> build_schema() {
 			o.eval.mixed_units_conversion = v == 0
 				? MIXED_UNITS_CONVERSION_NONE : MIXED_UNITS_CONVERSION_DEFAULT;
 		},
-		[](Options& o) {
+		[](Options& o, Calculator*) {
 			o.eval.auto_post_conversion = defaults().eval.auto_post_conversion;
 			o.eval.mixed_units_conversion = defaults().eval.mixed_units_conversion;
 		} },
@@ -259,11 +278,11 @@ static std::vector<Option> build_schema() {
 
 	{
 		auto& opt = add("binary_bits", Kind::INTEGER, { "bits" },
-			Binding{ [](Options& o, long long v) {
+			Binding{ [](Options& o, Calculator*, long long v) {
 				o.parse.binary_bits = v;
 				o.print.binary_bits = v;
 			},
-			[](Options& o) {
+			[](Options& o, Calculator*) {
 				o.parse.binary_bits = defaults().parse.binary_bits;
 				o.print.binary_bits = defaults().print.binary_bits;
 			} },
@@ -277,7 +296,9 @@ static std::vector<Option> build_schema() {
 	}
 
 	add("binary_prefixes", Kind::BOOLEAN, { "binpref" },
-		field(&Options::binary_prefixes));
+		calculator([](Calculator* calc, long long v) {
+			calc->useBinaryPrefixes(v ? 1 : 0);
+		}, false));
 
 	add("calculate_functions", Kind::BOOLEAN, { "calcfunc" },
 		field(&Options::eval, &EvaluationOptions::calculate_functions));
@@ -285,20 +306,33 @@ static std::vector<Option> build_schema() {
 	add("calculate_variables", Kind::BOOLEAN, { "calcvar" },
 		field(&Options::eval, &EvaluationOptions::calculate_variables));
 
+	add("caret_as_xor", Kind::BOOLEAN, { "xor^" },
+		field(&Options::caret_as_xor), {}, true);
+
 	add("complex_form", Kind::ENUM, { "cplxform" },
-		field(&Options::eval, &EvaluationOptions::complex_number_form),
+		Binding{ [](Options& o, Calculator*, long long v) {
+			o.complex_angle_form = v == INTERNAL_COMPLEX_ANGLE;
+			o.eval.complex_number_form = o.complex_angle_form
+				? COMPLEX_NUMBER_FORM_CIS : static_cast<ComplexNumberForm>(v);
+		}, [](Options& o, Calculator*) {
+			o.complex_angle_form = defaults().complex_angle_form;
+			o.eval.complex_number_form = defaults().eval.complex_number_form;
+		} },
 		{
 			{ 0, COMPLEX_NUMBER_FORM_RECTANGULAR, { "cartesian", "rect", "rectangular" } },
 			{ 1, COMPLEX_NUMBER_FORM_EXPONENTIAL, { "exp", "exponential" } },
 			{ 2, COMPLEX_NUMBER_FORM_POLAR, { "polar" } },
 			{ 3, COMPLEX_NUMBER_FORM_CIS, { "cis" } },
+			{ 4, INTERNAL_COMPLEX_ANGLE, { "angle", "phasor" } },
 		});
 
 	add("complex_numbers", Kind::BOOLEAN, { "cplx" },
 		field(&Options::eval, &EvaluationOptions::allow_complex));
 
 	add("concise_uncertainty", Kind::BOOLEAN, { "concise" },
-		field(&Options::concise_uncertainty),
+		calculator([](Calculator* calc, long long v) {
+			calc->setConciseUncertaintyInputEnabled(v);
+		}, false),
 		{},
 		true);
 
@@ -306,7 +340,11 @@ static std::vector<Option> build_schema() {
 		field(&Options::eval, &EvaluationOptions::local_currency_conversion));
 
 	add("decimal_comma", Kind::ENUM, {},
-		field(&Options::decimal_comma),
+		Binding{ [](Options& o, Calculator* calc, long long v) {
+			o.set_decimal_separator(calc, v);
+		}, [](Options& o, Calculator* calc) {
+			o.set_decimal_separator(calc, -1);
+		} },
 		{
 			{ -1, -1, { "locale" } },
 			{ 0, 0, { "off" } },
@@ -323,6 +361,9 @@ static std::vector<Option> build_schema() {
 			{ 0, DIGIT_GROUPING_NONE, { "none", "off" } },
 			{ 1, DIGIT_GROUPING_STANDARD, { "on", "standard" } },
 			{ 2, DIGIT_GROUPING_LOCALE, { "locale" } },
+#if QALCULATE_MAJOR_VERSION > 5 || (QALCULATE_MAJOR_VERSION == 5 && QALCULATE_MINOR_VERSION >= 13)
+			{ 3, DIGIT_GROUPING_UNDERSCORE, { "underscore" } },
+#endif
 		});
 
 	add("division_sign", Kind::ENUM, { "divsign" },
@@ -348,7 +389,7 @@ static std::vector<Option> build_schema() {
 		});
 
 	add("fractions", Kind::ENUM, { "fr" },
-		Binding{ [](Options& o, long long v) {
+		Binding{ [](Options& o, Calculator*, long long v) {
 			o.print.number_fraction_format = static_cast<NumberFractionFormat>(v);
 			o.print.restrict_fraction_length =
 				v == FRACTION_FRACTIONAL || v == FRACTION_COMBINED;
@@ -361,7 +402,7 @@ static std::vector<Option> build_schema() {
 				o.print.number_fraction_format = FRACTION_FRACTIONAL;
 			}
 		},
-		[](Options& o) {
+		[](Options& o, Calculator*) {
 			o.print.number_fraction_format = defaults().print.number_fraction_format;
 			o.print.restrict_fraction_length = defaults().print.restrict_fraction_length;
 			o.auto_fraction = defaults().auto_fraction;
@@ -376,9 +417,11 @@ static std::vector<Option> build_schema() {
 			{ 5, INTERNAL_FRACTION_DUAL, { "dual" } },
 			{ 6, FRACTION_FRACTIONAL_FIXED_DENOMINATOR, {} },
 			{ 7, FRACTION_COMBINED_FIXED_DENOMINATOR, {} },
+#if QALCULATE_MAJOR_VERSION > 5 || (QALCULATE_MAJOR_VERSION == 5 && QALCULATE_MINOR_VERSION >= 3)
 			{ 8, FRACTION_PERCENT, { "%", "percent" } },
 			{ 9, FRACTION_PERMILLE, { "permille", "‰" } },
 			{ 10, FRACTION_PERMYRIAD, { "permyriad", "‱" } },
+#endif
 		});
 
 	add("functions", Kind::BOOLEAN, { "func" },
@@ -395,9 +438,22 @@ static std::vector<Option> build_schema() {
 		true);
 
 	add("ignore_comma", Kind::BOOLEAN, { "nocomma" },
-		field(&Options::parse, &ParseOptions::comma_as_separator, true),
+		Binding{ [](Options& o, Calculator* calc, long long v) {
+			o.parse.comma_as_separator = v;
+			if (calc->getDecimalPoint() != ",") calc->useDecimalPoint(v);
+		}, [](Options& o, Calculator* calc) {
+			o.parse.comma_as_separator = defaults().parse.comma_as_separator;
+			if (calc->getDecimalPoint() != ",") {
+				calc->useDecimalPoint(o.parse.comma_as_separator);
+			}
+		} },
 		{},
-		true).coupling = Coupling::SEPARATORS;
+		true).coupling =
+#if QALCULATE_MAJOR_VERSION > 5 || (QALCULATE_MAJOR_VERSION == 5 && QALCULATE_MINOR_VERSION >= 2)
+		Coupling::SEPARATORS;
+#else
+		Coupling::NONE;
+#endif
 
 	add("ignore_dot", Kind::BOOLEAN, { "nodot" },
 		field(&Options::parse, &ParseOptions::dot_as_separator),
@@ -407,13 +463,31 @@ static std::vector<Option> build_schema() {
 	add("infinite_numbers", Kind::BOOLEAN, { "inf" },
 		field(&Options::eval, &EvaluationOptions::allow_infinite));
 
+	add("imaginary_j", Kind::BOOLEAN, { "imgj" },
+		calculator([](Calculator* calc, long long v) {
+			auto* imaginary = calc->getVariableById(VARIABLE_ID_I);
+			if (bool(v) == (imaginary->hasName("j") > 0)) return;
+
+			if (v) {
+				ExpressionName name = imaginary->getName(1);
+				name.name = "j";
+				name.reference = false;
+				imaginary->addName(name, 1, true);
+			} else {
+				imaginary->clearNonReferenceNames();
+			}
+			imaginary->setChanged(false);
+		}, false), {}, true);
+
 	add("input_base", Kind::BASE, { "inbase" },
 		field(&Options::parse, &ParseOptions::base),
 		input_bases,
 		true);
 
 	add("interval_arithmetic", Kind::BOOLEAN, { "ia", "interval" },
-		field(&Options::interval_arithmetic));
+		calculator([](Calculator* calc, long long v) {
+			calc->useIntervalArithmetic(v);
+		}, true));
 
 	add("interval_calculation", Kind::ENUM, { "ic", "uncertainty_propagation", "up" },
 		field(&Options::eval, &EvaluationOptions::interval_calculation),
@@ -443,11 +517,11 @@ static std::vector<Option> build_schema() {
 
 	{
 		auto& opt = add("max_decimals", Kind::INTEGER, { "maxdeci" },
-			Binding{ [](Options& o, long long v) {
+			Binding{ [](Options& o, Calculator*, long long v) {
 				o.print.use_max_decimals = v >= 0;
 				if (v >= 0) o.print.max_decimals = v;
 			},
-			[](Options& o) {
+			[](Options& o, Calculator*) {
 				o.print.use_max_decimals = defaults().print.use_max_decimals;
 				o.print.max_decimals = defaults().print.max_decimals;
 			} },
@@ -459,11 +533,11 @@ static std::vector<Option> build_schema() {
 
 	{
 		auto& opt = add("min_decimals", Kind::INTEGER, { "mindeci" },
-			Binding{ [](Options& o, long long v) {
+			Binding{ [](Options& o, Calculator*, long long v) {
 				o.print.use_min_decimals = v >= 0;
 				o.print.min_decimals = std::max(0LL, v);
 			},
-			[](Options& o) {
+			[](Options& o, Calculator*) {
 				o.print.use_min_decimals = defaults().print.use_min_decimals;
 				o.print.min_decimals = defaults().print.min_decimals;
 			} },
@@ -474,8 +548,10 @@ static std::vector<Option> build_schema() {
 	}
 
 	add("minus_last", Kind::BOOLEAN, { "minlast" },
-		Binding{ [](Options& o, long long v) { o.print.sort_options.minus_last = v; },
-		[](Options& o) {
+		Binding{ [](Options& o, Calculator*, long long v) {
+			o.print.sort_options.minus_last = v;
+		},
+		[](Options& o, Calculator*) {
 			o.print.sort_options.minus_last = defaults().print.sort_options.minus_last;
 		} });
 
@@ -493,7 +569,7 @@ static std::vector<Option> build_schema() {
 		bases);
 
 	add("parsing_mode", Kind::ENUM, { "parse", "syntax" },
-		field(&Options::parsing_mode, false),
+		field(&Options::parsing_mode),
 		{
 			{ 0, PARSING_MODE_ADAPTIVE, { "adaptive" } },
 			{ 1, PARSING_MODE_IMPLICIT_MULTIPLICATION_FIRST, { "implicit_first" } },
@@ -508,7 +584,9 @@ static std::vector<Option> build_schema() {
 
 	{
 		auto& opt = add("precision", Kind::INTEGER, { "prec" },
-			field(&Options::precision));
+			calculator([](Calculator* calc, long long v) {
+				if (calc->getPrecision() != v) calc->setPrecision(v);
+			}, 10));
 		opt.min = 1;
 	}
 
@@ -528,9 +606,9 @@ static std::vector<Option> build_schema() {
 	add("repeating_decimals", Kind::ENUM, { "repeating_decimal", "repdeci" },
 		field(&Options::print, &PrintOptions::indicate_infinite_series),
 		{
-			{ 0, 0, { "off" } },
-			{ 1, 1, { "on", "ellipsis" } },
-			{ 2, 2, { "overline" } },
+			{ 0, REPEATING_DECIMALS_OFF, { "off" } },
+			{ 1, REPEATING_DECIMALS_ELLIPSIS, { "on", "ellipsis" } },
+			{ 2, REPEATING_DECIMALS_OVERLINE, { "overline" } },
 		}).accept_boolean = true;
 #else
 	add("repeating_decimals", Kind::BOOLEAN, { "repeating_decimal", "repdeci" },
@@ -554,7 +632,7 @@ static std::vector<Option> build_schema() {
 		});
 
 	add("rpn_syntax", Kind::BOOLEAN, { "rpnsyn" },
-		field(&Options::rpn_syntax, false),
+		field(&Options::rpn_syntax),
 		{},
 		true);
 
@@ -563,12 +641,23 @@ static std::vector<Option> build_schema() {
 			field(&Options::print, &PrintOptions::min_exp),
 			{
 				{ -1, -1, { "auto" } },
+#if QALCULATE_MAJOR_VERSION > 5 || (QALCULATE_MAJOR_VERSION == 5 && QALCULATE_MINOR_VERSION >= 3)
 				{ -3, -3, { "eng", "engineering" } },
+#else
+				{ -3, -3, { "engineering" } },
+#endif
 				{ 0, 0, { "off" } },
 				{ 1, 1, { "pure" } },
+#if QALCULATE_MAJOR_VERSION > 5 || (QALCULATE_MAJOR_VERSION == 5 && QALCULATE_MINOR_VERSION >= 3)
 				{ 3, 3, { "sci", "scientific" } },
+#else
+				{ 3, 3, { "scientific" } },
+#endif
 			});
 		opt.min = -2147483648;
+		for (const char* value : { "E", "e", "pow", "pow10", "power", "power_of_10" }) {
+			opt.redirects.emplace(value, "exp_display");
+		}
 	}
 
 	add("short_multiplication", Kind::BOOLEAN, { "shortmul" },
@@ -580,8 +669,13 @@ static std::vector<Option> build_schema() {
 	add("show_negative_exponents", Kind::BOOLEAN, { "negexp" },
 		field(&Options::print, &PrintOptions::negative_exponents));
 
+	add("simplified_percentage", Kind::BOOLEAN, { "percent" },
+		field(&Options::simplified_percentage), {}, true);
+
 	add("sinc", Kind::ENUM, {},
-		field(&Options::sinc),
+		calculator([](Calculator* calc, long long v) {
+			calc->getFunctionById(FUNCTION_ID_SINC)->setDefaultValue(2, v ? "pi" : "");
+		}, 0),
 		{
 			{ 0, 0, { "unnormalized" } },
 			{ 1, 1, { "normalized" } },
@@ -597,7 +691,9 @@ static std::vector<Option> build_schema() {
 		field(&Options::eval, &EvaluationOptions::sync_units));
 
 	add("temperature_calculation", Kind::ENUM, { "temp" },
-		field(&Options::temperature),
+		calculator([](Calculator* calc, long long v) {
+			calc->setTemperatureCalculationMode(static_cast<TemperatureCalculationMode>(v));
+		}, TEMPERATURE_CALCULATION_HYBRID),
 		{
 			{ 0, TEMPERATURE_CALCULATION_HYBRID, { "hybrid" } },
 			{ 1, TEMPERATURE_CALCULATION_ABSOLUTE, { "absolute" } },
@@ -607,16 +703,21 @@ static std::vector<Option> build_schema() {
 	add("twos_complement", Kind::BOOLEAN, { "twos" },
 		field(&Options::print, &PrintOptions::twos_complement));
 
-	add("twos_complement_input", Kind::BOOLEAN, { "twos_input", "twosin" },
+	add("twos_complement_input", Kind::BOOLEAN,
+#if QALCULATE_MAJOR_VERSION > 5 || (QALCULATE_MAJOR_VERSION == 5 && QALCULATE_MINOR_VERSION >= 10)
+		{ "twos_input", "twosin" },
+#else
+		{ "twosin" },
+#endif
 		field(&Options::parse, &ParseOptions::twos_complement),
 		{},
 		true);
 
 	add("unicode", Kind::BOOLEAN, { "uni" },
-		field(&Options::unicode, false));
+		field(&Options::unicode));
 
 	add("unicode_exponents", Kind::ENUM, { "uniexp" },
-		field(&Options::unicode_exponents, false),
+		field(&Options::unicode_exponents),
 		{
 			{ 0, UNICODE_SIGNS_WITHOUT_EXPONENTS, { "off" } },
 			{ 1, UNICODE_SIGNS_ON, { "on" } },
@@ -629,7 +730,9 @@ static std::vector<Option> build_schema() {
 		true);
 
 	add("variable_units", Kind::BOOLEAN, { "varunits" },
-		field(&Options::variable_units));
+		calculator([](Calculator* calc, long long v) {
+			calc->setVariableUnitsEnabled(v);
+		}, true));
 
 	add("variables", Kind::BOOLEAN, { "var" },
 		field(&Options::parse, &ParseOptions::variables_enabled),
@@ -646,6 +749,14 @@ static std::vector<Option> build_schema() {
 static const std::vector<Option>& schema() {
 	static const auto opts = build_schema();
 	return opts;
+}
+
+void Options::initialize(Calculator* calc) {
+	startup_decimal_comma = calc->getDecimalPoint() == ",";
+	for (const auto& opt : schema()) {
+		opt.binding.reset(*this, calc);
+	}
+	derive_retained_prefs();
 }
 
 static const Option& find_opt(const std::string& name) {
@@ -700,6 +811,10 @@ std::vector<std::string> Option::candidates() const {
 		for (const char* value : { "on", "off", "true", "false", "0", "1" }) {
 			result.push_back(value);
 		}
+	}
+
+	for (const auto& redirect : redirects) {
+		result.push_back(redirect.first);
 	}
 
 	std::sort(result.begin(), result.end());
@@ -821,6 +936,15 @@ Assignment Assignments::read_assignment(
 	}
 
 	const auto& opt = find_opt(name);
+	if (!reset && lua_type(L, index) == LUA_TSTRING) {
+		const auto text = string_at(L, index);
+		auto redirect = opt.redirects.find(text);
+		if (redirect == opt.redirects.end()) redirect = opt.redirects.find(lower(text));
+		if (redirect != opt.redirects.end()) {
+			return parse_assignment(L, index, find_opt(redirect->second));
+		}
+	}
+
 	return reset ? Assignment::make_reset(opt) : parse_assignment(L, index, opt);
 }
 
@@ -941,17 +1065,43 @@ static void push_spec(
 }
 
 void ConfigUpdate::apply(Options& options, Calculator* calc) const {
-	bool state_changed = false;
 	for (const auto& change : changes) {
 		const Option& opt = schema()[change.option_id];
-		if (change.reset) opt.binding.reset(options);
-		else opt.binding.set(options, change.value);
-
-		state_changed = state_changed || opt.binding.state;
+		if (change.reset) opt.binding.reset(options, calc);
+		else opt.binding.set(options, calc, change.value);
 	}
 
 	options.derive_retained_prefs();
-	if (state_changed) options.apply_state_opts_to(calc);
+}
+
+// see SeparatorState for more info
+SeparatorState ConfigUpdate::updated_seps(SeparatorState state) const {
+	for (const auto& change : changes) {
+		const auto& name = schema()[change.option_id].name;
+
+		if (name == "decimal_comma") {
+			state.decimal_comma = change.reset ? -1 : change.value;
+		} else if (name == "ignore_dot") {
+			state.ignore_dot = change.reset
+				? defaults().parse.dot_as_separator : change.value;
+		} else if (name == "ignore_comma") {
+			state.ignore_comma = change.reset
+				? defaults().parse.comma_as_separator : change.value;
+		}
+	}
+
+	const bool comma = state.decimal_comma < 0
+		? state.startup_decimal_comma
+		: state.decimal_comma != 0;
+
+	if ((comma && state.ignore_comma) || (!comma && state.ignore_dot)) {
+		throw std::runtime_error(comma
+			? "qalc: incompatible separator settings: ignore_comma with decimal comma"
+			: "qalc: incompatible separator settings: ignore_dot with decimal point"
+		);
+	}
+
+	return state;
 }
 
 int lua_option_schema(lua_State* L) {

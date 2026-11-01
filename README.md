@@ -5,6 +5,10 @@
 A Neovim plugin for reactive spreadsheet-like calculations.
 Powered by [`libqalculate`](https://github.com/Qalculate/libqalculate).
 
+Disclaimer: This project is a bit of a spaghetti pile and there's a bit of
+barely reviewed LLM code (mostly options handling boilerplate) because
+libqalculate is not the most pleasant library to work with.
+
 ![screenshot](assets/screenshot.png)
 
 ## Features
@@ -165,6 +169,23 @@ buffer to apply to those.
 
 Use `:QalcSet` without arguments to show which calculator options have been
 explicitly set (either through `setup()`'s `qalc_options` or `:QalcSet`).
+
+## Unfinished
+
+(2026-10-31) The plugin works, but there are still a few niche `qalc` parity
+features (mostly options) that are missing. I'm a bit tired of working on this
+project for now but I will try to implement them if there is enough demand
+(feel free to open an issue, I will get around to it when I have some free
+time). The missing options:
+
+- setting display digits in significant digits rather than digits after decimal point
+- set default angle unit to something other than rad/deg/grad (e.g. arcsecond)
+- custom input/output bases beyond the existing list of supported bases
+- express results using a fixed fraction denominator
+- adaptive interval notation depending on the expression
+- setting a default currency that overrides locale
+- setting a default language that overrides locale
+- option to ignore startup locale
 
 ## Quirks
 

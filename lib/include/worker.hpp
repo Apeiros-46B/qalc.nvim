@@ -144,9 +144,12 @@ private:
 	std::mutex queue_mutex;
 	std::condition_variable cv;
 
-	// this is the only calculator instance we can use
+	// this is the only calculator instance we can use (libqalc singleton quirk...)
 	Calculator* calc = nullptr;
 	options::Options opts;
+
+	// state after all accepted jobs, guarded by queue_mutex
+	options::SeparatorState sep_state;
 
 	void main_loop();
 	void process_results();

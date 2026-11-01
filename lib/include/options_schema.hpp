@@ -27,21 +27,26 @@ struct Choice {
 };
 using Choices = std::vector<Choice>;
 
-using Setter = std::function<void(Options&, long long)>;
-using Resetter = std::function<void(Options&)>;
-
-// setter and resetter for a specific option
+// how to set or reset a specific option
 struct Binding {
+	using Setter = std::function<void(Options&, Calculator*, long long)>;
+	using Resetter = std::function<void(Options&, Calculator*)>;
+
 	Setter set;
 	Resetter reset;
-	bool state = false; // whether this requires updating the Calculator too
 
-	Binding(Setter set = {}, Resetter reset = {}, bool state = false);
+	Binding(Setter set = {}, Resetter reset = {});
 };
 
 struct Option {
 	std::string name;
 	std::vector<std::string> aliases;
+	// value -> another target option
+	// for example:
+	// - exp=10 -> scientific_notation
+	// - exp=e -> exp_display=e
+	// - exp=pow10 -> exp_display=pow10
+	std::map<std::string, std::string> redirects;
 
 	Kind kind;
 	Choices choices;

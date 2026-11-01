@@ -1,5 +1,3 @@
-#include <libqalculate/BuiltinFunctions.h>
-
 #include "options.hpp"
 
 namespace options {
@@ -30,35 +28,23 @@ Options::Options() {
 
 void Options::derive_retained_prefs() {
 	parse.parsing_mode = rpn_syntax ? PARSING_MODE_RPN : parsing_mode;
+
+	if (!simplified_percentage) {
+		parse.parsing_mode = static_cast<ParsingMode>(
+			parse.parsing_mode | PARSE_PERCENT_AS_ORDINARY_CONSTANT
+		);
+	}
+
 	print.use_unicode_signs = unicode ? unicode_exponents : UNICODE_SIGNS_OFF;
 	eval.parse_options = parse;
 }
 
-void Options::set_startup_locale(const Calculator* calc) {
-	startup_decimal_comma = calc->getDecimalPoint() == ",";
-}
-
-void Options::apply_state_opts_to(Calculator* calc) const {
-	if (decimal_comma > 0 || (decimal_comma < 0 && startup_decimal_comma)) {
+void Options::set_decimal_separator(Calculator* calc, int mode) const {
+	if (mode > 0 || (mode < 0 && startup_decimal_comma)) {
 		calc->useDecimalComma();
 	} else {
 		calc->useDecimalPoint(parse.comma_as_separator);
 	}
-
-	if (calc->getPrecision() != precision) {
-		calc->setPrecision(precision);
-	}
-
-	calc->getFunctionById(FUNCTION_ID_SINC)->setDefaultValue(2, sinc ? "pi" : "");
-
-	calc->useBinaryPrefixes(binary_prefixes ? 1 : 0);
-	calc->setConciseUncertaintyInputEnabled(concise_uncertainty);
-	calc->useIntervalArithmetic(interval_arithmetic);
-	calc->setVariableUnitsEnabled(variable_units);
-
-	calc->defaultAssumptions()->setSign(assumption_sign);
-	calc->defaultAssumptions()->setType(assumption_type);
-	calc->setTemperatureCalculationMode(temperature);
 }
 
 }

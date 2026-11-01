@@ -289,8 +289,8 @@ Worker::Worker(lua_State* L): L{L} {
 	calc->loadExchangeRates();
 	calc->loadGlobalDefinitions();
 
-	opts.set_startup_locale(calc);
-	opts.apply_state_opts_to(calc);
+	sep_state.startup_decimal_comma = calc->getDecimalPoint() == ",";
+	opts.initialize(calc);
 
 	// SECURITY: remove "command" function
 	// risk of RCE since it allows qalc files to execute arbitrary shell commands
@@ -351,6 +351,9 @@ void Worker::set_callback(int ref) {
 void Worker::submit_job(Job&& job) {
 	{
 		std::lock_guard<std::mutex> lock(queue_mutex);
+		if (job.type == JobType::UPDATE_CONFIG) {
+			sep_state = job.config.updated_seps(sep_state);
+		}
 		input.push(std::move(job));
 	}
 	cv.notify_one();
@@ -413,16 +416,30 @@ static void clear_syms(Calculator* calc) {
 	}
 }
 
+static void replace_all(
+	std::string& text,
+	const std::string& from,
+	const std::string& to
+) {
+	std::size_t pos = 0;
+	while ((pos = text.find(from, pos)) != std::string::npos) {
+		text.replace(pos, from.size(), to);
+		pos += to.size();
+	}
+}
+
 // worker thread
 // parse an expression and extract assigned and read symbols, along with any messages
 static void parse_line(
 	Calculator* calc,
 	const ParseInput& input,
 	ParseResult& result,
-	const ParseOptions& opts
+	const options::Options& options
 ) {
+	const auto& opts = options.parse;
 	// convert locale separators before parsing
 	std::string expr = calc->unlocalizeExpression(input.text, opts);
+	if (options.caret_as_xor) replace_all(expr, "^", "⊻");
 
 	// thankfully this exists
 	transform_expression_for_equals_save(expr, opts);
@@ -450,7 +467,7 @@ static void parse_batch(
 	Calculator* calc,
 	Job& job,
 	JobResult& result,
-	const ParseOptions& opts
+	const options::Options& opts
 ) {
 	result.parse_results.reserve(job.parse_inputs.size());
 
@@ -526,6 +543,26 @@ static void strip_terminal_styles(std::string& text) {
 	text.swap(stripped);
 }
 
+// vibecoded
+// something to do with complex numbers idk bro libqalculate is kinda bogged
+static bool has_cis_conversion(
+	Calculator* calc, std::string expr, const EvaluationOptions& opts
+) {
+	std::string conversion;
+	while (calc->separateToExpression(expr, conversion, opts, true)) {
+		expr = std::move(conversion);
+		std::string remaining;
+		std::string target = expr;
+		calc->separateToExpression(target, remaining, opts, true);
+		const auto first = target.find_first_not_of(" \t\r\n");
+		const auto last = target.find_last_not_of(" \t\r\n");
+		if (first != std::string::npos && target.substr(first, last - first + 1) == "cis") {
+			return true;
+		}
+	}
+	return false;
+}
+
 // worker thread
 // evaluate an expression
 static bool eval_line(
@@ -540,8 +577,11 @@ static bool eval_line(
 	PrintOptions print_opts = opts.print;
 	print_opts.allow_non_usable = multiline;
 
+	std::string expr = input.expr;
+	if (opts.caret_as_xor) replace_all(expr, "^", "⊻");
+
 	result.output = calc->calculateAndPrint(
-		input.expr,
+		expr,
 		EVAL_TIMEOUT_MS,
 		opts.eval,
 		print_opts,
@@ -558,6 +598,11 @@ static bool eval_line(
 	if (multiline) {
 		// for some reason libqalculate adds sgr sequences when multiline
 		strip_terminal_styles(result.output);
+	}
+
+	// explicit conversions take precedence over the stored complex form
+	if (opts.complex_angle_form && !has_cis_conversion(calc, expr, opts.eval)) {
+		replace_all(result.output, " cis ", "∠");
 	}
 
 	auto elapsed = std::chrono::steady_clock::now() - started_at;
@@ -729,7 +774,7 @@ void Worker::main_loop() {
 		try {
 			switch (job.type) {
 				case JobType::PARSE_BATCH: {
-					parse_batch(calc, job, result, opts.parse);
+					parse_batch(calc, job, result, opts);
 					break;
 				}
 				case JobType::EVAL_BATCH: {
