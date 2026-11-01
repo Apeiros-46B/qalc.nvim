@@ -2,10 +2,10 @@
 vim.api.nvim_create_user_command('Qalc',
 	function(cmd)
 		local buffer = require('qalc.buffer')
-		buffer.new_buf(cmd.args)
+		buffer.new_buf(cmd.args, cmd.bang)
 		vim.bo.filetype = 'qalc'
 	end,
-	{ nargs = '?' }
+	{ nargs = '?', bang = true }
 )
 
 vim.api.nvim_create_user_command('QalcReset',

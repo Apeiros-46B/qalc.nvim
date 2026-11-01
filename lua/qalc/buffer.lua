@@ -253,7 +253,7 @@ handle_eval_batch = function(bufnr, result)
 	finish_eval(result.complete)
 end
 
-function M.new_buf(name)
+function M.new_buf(name, scratch)
 	if not name or name == '' then
 		name = cfg.bufname
 	end
@@ -262,6 +262,12 @@ function M.new_buf(name)
 		vim.cmd.enew()
 	else
 		vim.api.nvim_cmd({ cmd = 'edit', args = { name } }, {})
+	end
+
+	if scratch then
+		vim.bo.buftype = 'nofile'
+		vim.bo.bufhidden = 'hide'
+		vim.bo.swapfile = false
 	end
 end
 

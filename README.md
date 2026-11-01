@@ -68,7 +68,8 @@ to build the C++ backend:
 
 Edit a file with extension `.qalc` or use the `:Qalc` command to create a new
 calculator buffer. The `:Qalc` command optionally accepts one argument for the
-name of the newly created buffer.
+name of the newly created buffer. Use `:Qalc!` instead of `:Qalc` for a scratch
+buf.
 
 To turn an existing buffer into a calculator, set the filetype to `qalc`.
 
