@@ -6,10 +6,17 @@ if result.code ~= 0 then
 	error(result.stderr or result.stdout or 'build command failed')
 end
 
--- not sure which extension is used, so we just make symlinks for all of them
 local exts = { 'dll', 'dylib', 'so' }
+local src
 for _, ext in ipairs(exts) do
-	local src = '../../lib/result/lib/libqalcbridge.' .. ext
+	if vim.uv.fs_stat(root .. '/lib/result/lib/libqalcbridge.' .. ext) then
+		src = '../../lib/result/lib/libqalcbridge.' .. ext
+		break
+	end
+end
+assert(src, 'built qalcbridge library not found')
+
+for _, ext in ipairs(exts) do
 	local dst = root .. '/lua/qalc/lib.' .. ext
 
 	vim.uv.fs_unlink(dst)

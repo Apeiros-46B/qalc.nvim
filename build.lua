@@ -16,11 +16,18 @@ run({
 })
 run({ 'cmake', '--build', './lib/build' })
 
--- not sure which extension is used, so we just make symlinks for all of them
 -- TODO: replace this with `cmake --install`
 local exts = { 'dll', 'dylib', 'so' }
+local src
 for _, ext in ipairs(exts) do
-	local src = '../../lib/build/libqalcbridge.' .. ext
+	if vim.uv.fs_stat(root .. '/lib/build/libqalcbridge.' .. ext) then
+		src = '../../lib/build/libqalcbridge.' .. ext
+		break
+	end
+end
+assert(src, 'built qalcbridge library not found')
+
+for _, ext in ipairs(exts) do
 	local dst = root .. '/lua/qalc/lib.' .. ext
 
 	vim.uv.fs_unlink(dst)
